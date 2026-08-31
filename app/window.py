@@ -1,4 +1,4 @@
-﻿from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
@@ -33,6 +33,7 @@ class ManagerWindow(QMainWindow):
         layout = QVBoxLayout(root)
 
         layout.addWidget(self._build_bot_section())
+        layout.addWidget(self._build_player_section())
         layout.addWidget(self._build_twitch_section())
         layout.addWidget(self._build_queue_section(), 1)
 
@@ -67,6 +68,40 @@ class ManagerWindow(QMainWindow):
         form.addRow("Status:", self.bot_status_label)
 
         return group
+
+    def _build_player_section(self) -> QGroupBox:
+        group = QGroupBox("LinkCue Player")
+        form = QFormLayout(group)
+
+        self.player_status_label = QLabel("Not checked")
+        self.player_status_label.setObjectName(
+            "playerStatusLabel"
+        )
+        form.addRow("Player:", self.player_status_label)
+
+        self.playback_status_label = QLabel("Not checked")
+        self.playback_status_label.setObjectName(
+            "playbackStatusLabel"
+        )
+        form.addRow("Playback:", self.playback_status_label)
+
+        self.now_playing_label = QLabel("None")
+        self.now_playing_label.setObjectName(
+            "nowPlayingLabel"
+        )
+        form.addRow("Now Playing:", self.now_playing_label)
+
+        self.refresh_player_button = QPushButton("Refresh Player")
+        self.refresh_player_button.setObjectName(
+            "refreshPlayerButton"
+        )
+        self.refresh_player_button.clicked.connect(
+            self.refresh_player_status
+        )
+        form.addRow("", self.refresh_player_button)
+
+        return group
+
 
     def _build_twitch_section(self) -> QGroupBox:
         group = QGroupBox("Twitch Channels")
@@ -142,6 +177,41 @@ class ManagerWindow(QMainWindow):
 
         layout.addLayout(header)
 
+        controls = QHBoxLayout()
+
+        self.queue_url_input = QLineEdit()
+        self.queue_url_input.setObjectName("queueUrlInput")
+        self.queue_url_input.setPlaceholderText(
+            "YouTube or TikTok URL"
+        )
+
+        self.add_queue_button = QPushButton("Add to Queue")
+        self.add_queue_button.setObjectName("addQueueButton")
+        self.add_queue_button.clicked.connect(
+            self.add_to_queue
+        )
+
+        self.add_next_button = QPushButton("Add Next")
+        self.add_next_button.setObjectName("addNextButton")
+        self.add_next_button.clicked.connect(
+            self.add_next
+        )
+
+        self.remove_selected_button = QPushButton("Remove Selected")
+        self.remove_selected_button.setObjectName(
+            "removeSelectedButton"
+        )
+        self.remove_selected_button.clicked.connect(
+            self.remove_selected
+        )
+
+        controls.addWidget(self.queue_url_input, 1)
+        controls.addWidget(self.add_queue_button)
+        controls.addWidget(self.add_next_button)
+        controls.addWidget(self.remove_selected_button)
+
+        layout.addLayout(controls)
+
         self.queue_table = QTableWidget(0, 5)
         self.queue_table.setObjectName("queueTable")
         self.queue_table.setHorizontalHeaderLabels(
@@ -187,9 +257,49 @@ class ManagerWindow(QMainWindow):
 
         version = result.get("version", "unknown")
         self.bot_status_label.setText(
-            f"Connected — Bot {version}"
+            f"Connected â€” Bot {version}"
         )
         self.status_label.setText("Bot connection successful.")
+
+    def refresh_player_status(self) -> None:
+        self._update_client()
+
+        try:
+            presence = self.bot_client.player_status()
+            playback = self.bot_client.player_state()
+        except BotClientError as exc:
+            self.player_status_label.setText("Offline")
+            self.playback_status_label.setText("Unknown")
+            self.now_playing_label.setText("None")
+            self._show_error(exc)
+            return
+
+        if presence.get("active"):
+            self.player_status_label.setText("Active")
+        else:
+            self.player_status_label.setText("Offline")
+
+        state = playback.get("state", "unknown")
+
+        if state == "playing":
+            self.playback_status_label.setText("Playing")
+        elif state == "idle":
+            self.playback_status_label.setText("Idle")
+        else:
+            self.playback_status_label.setText(
+                str(state).title()
+            )
+
+        item = playback.get("item")
+
+        if item:
+            title = item.get("title") or item.get("url") or "Untitled video"
+            self.now_playing_label.setText(str(title))
+        else:
+            self.now_playing_label.setText("None")
+
+        self.status_label.setText("Player status refreshed.")
+
 
     def refresh_twitch_status(self) -> None:
         self._update_client()
@@ -207,7 +317,7 @@ class ManagerWindow(QMainWindow):
 
         if result.get("connected"):
             self.twitch_status_label.setText(
-                f"Active — {len(channels)} channel(s)"
+                f"Active â€” {len(channels)} channel(s)"
             )
         else:
             self.twitch_status_label.setText("Inactive")
@@ -274,7 +384,7 @@ class ManagerWindow(QMainWindow):
 
         if channels:
             self.twitch_status_label.setText(
-                f"Active — {len(channels)} channel(s)"
+                f"Active â€” {len(channels)} channel(s)"
             )
         else:
             self.twitch_status_label.setText("Inactive")
@@ -282,6 +392,86 @@ class ManagerWindow(QMainWindow):
         self.status_label.setText(
             result.get("status", "Twitch state updated.")
         )
+
+    def add_to_queue(self) -> None:
+        url = self.queue_url_input.text().strip()
+
+        if not url:
+            self.status_label.setText("Enter a video URL.")
+            return
+
+        self._update_client()
+
+        try:
+            self.bot_client.add_queue_item(url)
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self.queue_url_input.clear()
+        self.refresh_queue()
+        self.status_label.setText("Video added to queue.")
+
+    def add_next(self) -> None:
+        url = self.queue_url_input.text().strip()
+
+        if not url:
+            self.status_label.setText("Enter a video URL.")
+            return
+
+        self._update_client()
+
+        try:
+            result = self.bot_client.add_queue_item(url)
+            item_id = result.get("id")
+
+            if item_id is None:
+                raise BotClientError(
+                    "Bot did not return a queue item ID"
+                )
+
+            self.bot_client.move_queue_item(
+                int(item_id),
+                1,
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self.queue_url_input.clear()
+        self.refresh_queue()
+        self.status_label.setText("Video added next.")
+
+    def remove_selected(self) -> None:
+        row = self.queue_table.currentRow()
+
+        if row < 0:
+            self.status_label.setText("Select a queue item first.")
+            return
+
+        first_item = self.queue_table.item(row, 0)
+
+        if first_item is None:
+            self.status_label.setText("Selected queue item is invalid.")
+            return
+
+        item_id = first_item.data(Qt.ItemDataRole.UserRole)
+
+        if item_id is None:
+            self.status_label.setText("Selected queue item has no ID.")
+            return
+
+        self._update_client()
+
+        try:
+            self.bot_client.remove_queue_item(int(item_id))
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self.refresh_queue()
+        self.status_label.setText("Queue item removed.")
+
 
     def refresh_queue(self) -> None:
         self._update_client()
@@ -311,6 +501,12 @@ class ManagerWindow(QMainWindow):
                     Qt.AlignmentFlag.AlignVCenter
                     | Qt.AlignmentFlag.AlignLeft
                 )
+
+                if column == 0:
+                    table_item.setData(
+                        Qt.ItemDataRole.UserRole,
+                        item.get("id"),
+                    )
                 self.queue_table.setItem(
                     row,
                     column,
@@ -319,5 +515,5 @@ class ManagerWindow(QMainWindow):
 
         self.queue_table.resizeColumnsToContents()
         self.status_label.setText(
-            f"Queue refreshed — {len(items)} item(s)."
+            f"Queue refreshed â€” {len(items)} item(s)."
         )

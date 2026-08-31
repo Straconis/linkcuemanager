@@ -174,3 +174,135 @@ def test_http_error_becomes_bot_client_error():
 
     with pytest.raises(BotClientError):
         client.health()
+
+
+def test_player_status():
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.path == "/player/status"
+
+        return httpx.Response(
+            200,
+            json={
+                "active": True,
+                "last_heartbeat": "2026-08-31T21:00:00+00:00",
+                "timeout_seconds": 15,
+            },
+        )
+
+    client = make_client(handler)
+
+    assert client.player_status() == {
+        "active": True,
+        "last_heartbeat": "2026-08-31T21:00:00+00:00",
+        "timeout_seconds": 15,
+    }
+
+
+def test_player_state():
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.path == "/player/state"
+
+        return httpx.Response(
+            200,
+            json={
+                "state": "idle",
+                "item": None,
+            },
+        )
+
+    client = make_client(handler)
+
+    assert client.player_state() == {
+        "state": "idle",
+        "item": None,
+    }
+
+
+def test_add_queue_item():
+    def handler(request):
+        assert request.method == "POST"
+        assert request.url.path == "/queue"
+
+        payload = __import__("json").loads(
+            request.content.decode("utf-8")
+        )
+
+        assert payload == {
+            "url": "https://youtu.be/example",
+            "title": None,
+            "channel": None,
+            "submitted_by": "Steve",
+            "submission_source": "manager",
+        }
+
+        return httpx.Response(
+            201,
+            json={"id": 42},
+        )
+
+    client = make_client(handler)
+
+    result = client.add_queue_item(
+        "https://youtu.be/example",
+        submitted_by="Steve",
+    )
+
+    assert result == {"id": 42}
+
+
+def test_move_queue_item():
+    def handler(request):
+        assert request.method == "POST"
+        assert request.url.path == "/queue/42/move"
+
+        payload = __import__("json").loads(
+            request.content.decode("utf-8")
+        )
+
+        assert payload == {
+            "position": 1,
+        }
+
+        return httpx.Response(
+            200,
+            json={
+                "status": "moved",
+                "id": 42,
+                "position": 1,
+            },
+        )
+
+    client = make_client(handler)
+
+    result = client.move_queue_item(
+        42,
+        1,
+    )
+
+    assert result["status"] == "moved"
+    assert result["position"] == 1
+
+
+def test_remove_queue_item():
+    def handler(request):
+        assert request.method == "DELETE"
+        assert request.url.path == "/queue/42"
+
+        return httpx.Response(
+            200,
+            json={
+                "status": "deleted",
+                "id": 42,
+            },
+        )
+
+    client = make_client(handler)
+
+    result = client.remove_queue_item(42)
+
+    assert result == {
+        "status": "deleted",
+        "id": 42,
+    }

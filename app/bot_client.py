@@ -30,10 +30,16 @@ class BotClient:
         self,
         method: str,
         path: str,
+        *,
+        json_body: dict | None = None,
     ) -> dict | list:
         try:
             with self._client() as client:
-                response = client.request(method, path)
+                response = client.request(
+                    method,
+                    path,
+                    json=json_body,
+                )
                 response.raise_for_status()
                 return response.json()
         except httpx.HTTPError as exc:
@@ -46,9 +52,59 @@ class BotClient:
         result = self._request("GET", "/queue")
 
         if not isinstance(result, list):
-            raise BotClientError("Bot returned an invalid queue response")
+            raise BotClientError(
+                "Bot returned an invalid queue response"
+            )
 
         return result
+
+    def add_queue_item(
+        self,
+        url: str,
+        *,
+        title: str | None = None,
+        channel: str | None = None,
+        submitted_by: str | None = None,
+    ) -> dict:
+        return self._request(
+            "POST",
+            "/queue",
+            json_body={
+                "url": url,
+                "title": title,
+                "channel": channel,
+                "submitted_by": submitted_by,
+                "submission_source": "manager",
+            },
+        )
+
+    def move_queue_item(
+        self,
+        item_id: int,
+        position: int,
+    ) -> dict:
+        return self._request(
+            "POST",
+            f"/queue/{item_id}/move",
+            json_body={
+                "position": position,
+            },
+        )
+
+    def remove_queue_item(
+        self,
+        item_id: int,
+    ) -> dict:
+        return self._request(
+            "DELETE",
+            f"/queue/{item_id}",
+        )
+
+    def player_status(self) -> dict:
+        return self._request("GET", "/player/status")
+
+    def player_state(self) -> dict:
+        return self._request("GET", "/player/state")
 
     def twitch_status(self) -> dict:
         return self._request("GET", "/twitch/status")
