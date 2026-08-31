@@ -4,6 +4,18 @@ from PySide6.QtWidgets import QTableWidgetItem
 from app.config import APP_NAME, APP_VERSION, DEFAULT_BOT_URL
 from app.window import ManagerWindow
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def disable_startup_timer(monkeypatch):
+    monkeypatch.setattr(
+        "app.window.QTimer.singleShot",
+        lambda *args, **kwargs: None,
+    )
+
+
+
 
 def test_window_identity(qtbot):
     window = ManagerWindow()
@@ -237,3 +249,53 @@ def test_remove_selected_uses_hidden_item_id(qtbot):
 
     assert removed == [42]
     assert window.status_label.text() == "Queue item removed."
+
+
+def test_window_uses_compact_console_layout(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    assert window.width() == 1000
+    assert window.height() == 700
+    assert window.channel_list.maximumHeight() == 90
+
+
+def test_window_has_dark_mode_toggle(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    assert window.dark_mode_button.text() == "Dark Mode"
+    assert window.dark_mode_button.isCheckable()
+    assert not window.dark_mode_button.isChecked()
+
+
+def test_dark_mode_toggle_changes_stylesheet(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    window.dark_mode_button.setChecked(True)
+
+    assert window.styleSheet()
+    assert window.status_label.text() == "Dark mode enabled."
+
+    window.dark_mode_button.setChecked(False)
+
+    assert window.styleSheet() == ""
+    assert window.status_label.text() == "Dark mode disabled."
+
+
+def test_window_schedules_initial_player_refresh(qtbot, monkeypatch):
+    scheduled = []
+
+    monkeypatch.setattr(
+        "app.window.QTimer.singleShot",
+        lambda delay, callback: scheduled.append((delay, callback)),
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    assert len(scheduled) == 1
+    assert scheduled[0][0] == 0
+    assert scheduled[0][1].__self__ is window
+    assert scheduled[0][1].__func__ is ManagerWindow.refresh_player_status

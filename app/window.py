@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
@@ -16,14 +16,20 @@ from PySide6.QtWidgets import (
 
 from app.bot_client import BotClient, BotClientError
 from app.config import APP_NAME, APP_VERSION, DEFAULT_BOT_URL
+from app.queue_event_listener import (
+    QueueEventListener,
+    websocket_events_url,
+)
 
 
 class ManagerWindow(QMainWindow):
+    queue_refresh_requested = Signal(dict)
+
     def __init__(self):
         super().__init__()
 
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
-        self.resize(900, 650)
+        self.resize(1000, 700)
 
         self.bot_client = BotClient(DEFAULT_BOT_URL)
 
@@ -31,6 +37,8 @@ class ManagerWindow(QMainWindow):
         self.setCentralWidget(root)
 
         layout = QVBoxLayout(root)
+        layout.setContentsMargins(10, 10, 10, 8)
+        layout.setSpacing(8)
 
         layout.addWidget(self._build_bot_section())
         layout.addWidget(self._build_player_section())
@@ -41,14 +49,28 @@ class ManagerWindow(QMainWindow):
         self.status_label.setObjectName("statusLabel")
         layout.addWidget(self.status_label)
 
+        self.queue_refresh_requested.connect(
+            self.refresh_queue
+        )
+
+        self.queue_event_listener = QueueEventListener(
+            DEFAULT_BOT_URL,
+            self.queue_refresh_requested.emit,
+        )
+        self.queue_event_listener.start()
+
+        # Establish the initial Player state once the UI event loop starts.
+        QTimer.singleShot(0, self.refresh_player_status)
+
     def _build_bot_section(self) -> QGroupBox:
         group = QGroupBox("LinkCue Bot")
-        form = QFormLayout(group)
+        layout = QHBoxLayout(group)
 
-        url_row = QHBoxLayout()
+        layout.addWidget(QLabel("Bot URL:"))
 
         self.bot_url_input = QLineEdit(DEFAULT_BOT_URL)
         self.bot_url_input.setObjectName("botUrlInput")
+        layout.addWidget(self.bot_url_input, 1)
 
         self.test_connection_button = QPushButton("Test Connection")
         self.test_connection_button.setObjectName(
@@ -57,39 +79,54 @@ class ManagerWindow(QMainWindow):
         self.test_connection_button.clicked.connect(
             self.test_connection
         )
+        layout.addWidget(self.test_connection_button)
 
-        url_row.addWidget(self.bot_url_input, 1)
-        url_row.addWidget(self.test_connection_button)
-
-        form.addRow("Bot URL:", url_row)
+        layout.addWidget(QLabel("Status:"))
 
         self.bot_status_label = QLabel("Not checked")
         self.bot_status_label.setObjectName("botStatusLabel")
-        form.addRow("Status:", self.bot_status_label)
+        self.bot_status_label.setMinimumWidth(120)
+        layout.addWidget(self.bot_status_label)
+
+        self.dark_mode_button = QPushButton("Dark Mode")
+        self.dark_mode_button.setObjectName("darkModeButton")
+        self.dark_mode_button.setCheckable(True)
+        self.dark_mode_button.toggled.connect(
+            self.set_dark_mode
+        )
+        layout.addWidget(self.dark_mode_button)
 
         return group
 
     def _build_player_section(self) -> QGroupBox:
         group = QGroupBox("LinkCue Player")
-        form = QFormLayout(group)
+        layout = QHBoxLayout(group)
+
+        layout.addWidget(QLabel("Player:"))
 
         self.player_status_label = QLabel("Not checked")
         self.player_status_label.setObjectName(
             "playerStatusLabel"
         )
-        form.addRow("Player:", self.player_status_label)
+        layout.addWidget(self.player_status_label)
+
+        layout.addSpacing(20)
+        layout.addWidget(QLabel("Playback:"))
 
         self.playback_status_label = QLabel("Not checked")
         self.playback_status_label.setObjectName(
             "playbackStatusLabel"
         )
-        form.addRow("Playback:", self.playback_status_label)
+        layout.addWidget(self.playback_status_label)
+
+        layout.addSpacing(20)
+        layout.addWidget(QLabel("Now Playing:"))
 
         self.now_playing_label = QLabel("None")
         self.now_playing_label.setObjectName(
             "nowPlayingLabel"
         )
-        form.addRow("Now Playing:", self.now_playing_label)
+        layout.addWidget(self.now_playing_label, 1)
 
         self.refresh_player_button = QPushButton("Refresh Player")
         self.refresh_player_button.setObjectName(
@@ -98,10 +135,9 @@ class ManagerWindow(QMainWindow):
         self.refresh_player_button.clicked.connect(
             self.refresh_player_status
         )
-        form.addRow("", self.refresh_player_button)
+        layout.addWidget(self.refresh_player_button)
 
         return group
-
 
     def _build_twitch_section(self) -> QGroupBox:
         group = QGroupBox("Twitch Channels")
@@ -150,6 +186,7 @@ class ManagerWindow(QMainWindow):
 
         self.channel_list = QListWidget()
         self.channel_list.setObjectName("channelList")
+        self.channel_list.setMaximumHeight(90)
         layout.addWidget(self.channel_list)
 
         return group
@@ -163,6 +200,13 @@ class ManagerWindow(QMainWindow):
         title = QLabel("Current Bot Queue")
         title.setStyleSheet("font-weight: bold;")
 
+        self.player_count_label = QLabel("Players Connected: 0")
+        self.player_count_label.setObjectName("playerCountLabel")
+
+        self.manager_count_label = QLabel("Managers Connected: 0 (including this instance)")
+        self.manager_count_label.setObjectName("managerCountLabel")
+
+
         self.refresh_queue_button = QPushButton("Refresh Queue")
         self.refresh_queue_button.setObjectName(
             "refreshQueueButton"
@@ -173,6 +217,10 @@ class ManagerWindow(QMainWindow):
 
         header.addWidget(title)
         header.addStretch()
+        header.addWidget(self.player_count_label)
+        header.addSpacing(12)
+        header.addWidget(self.manager_count_label)
+        header.addSpacing(12)
         header.addWidget(self.refresh_queue_button)
 
         layout.addLayout(header)
@@ -237,10 +285,89 @@ class ManagerWindow(QMainWindow):
 
         return group
 
+    def set_dark_mode(self, enabled: bool) -> None:
+        if enabled:
+            self.setStyleSheet(
+                """
+                QMainWindow,
+                QWidget {
+                    background-color: #202124;
+                    color: #e8eaed;
+                }
+
+                QGroupBox {
+                    border: 1px solid #5f6368;
+                    border-radius: 5px;
+                    margin-top: 8px;
+                    padding-top: 8px;
+                }
+
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    padding: 0 4px;
+                }
+
+                QLineEdit,
+                QListWidget,
+                QTableWidget {
+                    background-color: #292a2d;
+                    color: #e8eaed;
+                    border: 1px solid #5f6368;
+                    selection-background-color: #3c4043;
+                }
+
+                QHeaderView::section {
+                    background-color: #303134;
+                    color: #e8eaed;
+                    border: 1px solid #5f6368;
+                    padding: 4px;
+                }
+
+                QPushButton {
+                    background-color: #303134;
+                    color: #e8eaed;
+                    border: 1px solid #5f6368;
+                    border-radius: 4px;
+                    padding: 4px 8px;
+                }
+
+                QPushButton:hover {
+                    background-color: #3c4043;
+                }
+
+                QPushButton:checked {
+                    background-color: #4d5156;
+                }
+                """
+            )
+            self.status_label.setText("Dark mode enabled.")
+        else:
+            self.setStyleSheet("")
+            self.status_label.setText("Dark mode disabled.")
     def _update_client(self) -> None:
-        self.bot_client = BotClient(
-            self.bot_url_input.text().strip()
-        )
+        base_url = self.bot_url_input.text().strip()
+
+        self.bot_client = BotClient(base_url)
+
+        if (
+            hasattr(self, "queue_event_listener")
+            and self.queue_event_listener.url
+            != websocket_events_url(base_url)
+        ):
+            self.queue_event_listener.stop()
+            self.queue_event_listener = QueueEventListener(
+                base_url,
+                self.queue_refresh_requested.emit,
+            )
+            self.queue_event_listener.start()
+
+    def _stop_background_services(self) -> None:
+        self.queue_event_listener.stop()
+
+    def closeEvent(self, event) -> None:
+        self._stop_background_services()
+        super().closeEvent(event)
 
     def _show_error(self, exc: Exception) -> None:
         self.status_label.setText(str(exc))
@@ -257,7 +384,7 @@ class ManagerWindow(QMainWindow):
 
         version = result.get("version", "unknown")
         self.bot_status_label.setText(
-            f"Connected â€” Bot {version}"
+            f"Connected - Bot {version}"
         )
         self.status_label.setText("Bot connection successful.")
 
@@ -317,7 +444,7 @@ class ManagerWindow(QMainWindow):
 
         if result.get("connected"):
             self.twitch_status_label.setText(
-                f"Active â€” {len(channels)} channel(s)"
+                f"Active - {{len(channels)}} channel(s)"
             )
         else:
             self.twitch_status_label.setText("Inactive")
@@ -384,7 +511,7 @@ class ManagerWindow(QMainWindow):
 
         if channels:
             self.twitch_status_label.setText(
-                f"Active â€” {len(channels)} channel(s)"
+                f"Active - {{len(channels)}} channel(s)"
             )
         else:
             self.twitch_status_label.setText("Inactive")
@@ -473,7 +600,36 @@ class ManagerWindow(QMainWindow):
         self.status_label.setText("Queue item removed.")
 
 
-    def refresh_queue(self) -> None:
+    def _update_presence_counts(self, event: dict) -> None:
+        self.player_count_label.setText(
+            f"Players Connected: {event.get('player_count', 0)}"
+        )
+        self.manager_count_label.setText(
+            f"Managers Connected: {event.get('manager_count', 0)} (including this instance)"
+        )
+
+
+    def refresh_queue(self, event: dict | None = None) -> None:
+        if event:
+            event_type = event.get("type")
+
+            if event_type == "connected":
+                self._update_presence_counts(event)
+            elif event_type == "manager_presence_changed":
+                self.manager_count_label.setText(
+                    f"Managers Connected: {event.get('manager_count', 0)} (including this instance)"
+                )
+            elif event_type == "player_presence_changed":
+                self.player_count_label.setText(
+                    f"Players Connected: {event.get('player_count', 0)}"
+                )
+
+            if event_type in {
+                "manager_presence_changed",
+                "player_presence_changed",
+            }:
+                return
+
         self._update_client()
 
         try:
@@ -515,5 +671,5 @@ class ManagerWindow(QMainWindow):
 
         self.queue_table.resizeColumnsToContents()
         self.status_label.setText(
-            f"Queue refreshed â€” {len(items)} item(s)."
+            f"Queue refreshed - {len(items)} item(s)."
         )
