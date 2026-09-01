@@ -93,3 +93,101 @@ def test_presence_signal_updates_player_count(qtbot, monkeypatch):
     )
 
     assert window.player_count_label.text() == "Players Connected: 4"
+
+
+def test_connected_snapshot_hydrates_queue_without_http_refresh():
+    rendered = []
+
+    window = SimpleNamespace(
+        _update_presence_counts=lambda event: None,
+        _apply_queue_snapshot=lambda snapshot: rendered.append(snapshot),
+        _update_client=lambda: (_ for _ in ()).throw(
+            AssertionError("HTTP queue refresh should not occur")
+        ),
+    )
+
+    ManagerWindow.refresh_queue(
+        window,
+        {
+            "type": "connected",
+            "player_count": 1,
+            "manager_count": 1,
+            "snapshot": {
+                "playing": [],
+                "queued": [
+                    {
+                        "id": 42,
+                        "position": 1,
+                        "title": "Test Video",
+                        "platform": "youtube",
+                        "submitted_by": "Streamer",
+                        "status": "queued",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert rendered == [
+        {
+            "playing": [],
+            "queued": [
+                {
+                    "id": 42,
+                    "position": 1,
+                    "title": "Test Video",
+                    "platform": "youtube",
+                    "submitted_by": "Streamer",
+                    "status": "queued",
+                }
+            ],
+        }
+    ]
+
+
+def test_queue_changed_snapshot_hydrates_queue_without_http_refresh():
+    rendered = []
+
+    window = SimpleNamespace(
+        _apply_queue_snapshot=lambda snapshot: rendered.append(snapshot),
+        _update_client=lambda: (_ for _ in ()).throw(
+            AssertionError("HTTP queue refresh should not occur")
+        ),
+    )
+
+    ManagerWindow.refresh_queue(
+        window,
+        {
+            "type": "queue_changed",
+            "revision": 7,
+            "snapshot": {
+                "playing": [],
+                "queued": [
+                    {
+                        "id": 99,
+                        "position": 1,
+                        "title": "Another Video",
+                        "platform": "youtube",
+                        "submitted_by": "Viewer",
+                        "status": "queued",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert rendered == [
+        {
+            "playing": [],
+            "queued": [
+                {
+                    "id": 99,
+                    "position": 1,
+                    "title": "Another Video",
+                    "platform": "youtube",
+                    "submitted_by": "Viewer",
+                    "status": "queued",
+                }
+            ],
+        }
+    ]

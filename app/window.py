@@ -620,6 +620,11 @@ class ManagerWindow(QMainWindow):
 
             if event_type == "connected":
                 self._update_presence_counts(event)
+
+                snapshot = event.get("snapshot")
+                if snapshot is not None:
+                    self._apply_queue_snapshot(snapshot)
+                    return
             elif event_type == "manager_presence_changed":
                 self.manager_count_label.setText(
                     f"Managers Connected: {event.get('manager_count', 0)} (including this instance)"
@@ -635,6 +640,13 @@ class ManagerWindow(QMainWindow):
             }:
                 return
 
+            if event_type == "queue_changed":
+                snapshot = event.get("snapshot")
+
+                if snapshot is not None:
+                    self._apply_queue_snapshot(snapshot)
+                    return
+
         self._update_client()
 
         try:
@@ -643,6 +655,13 @@ class ManagerWindow(QMainWindow):
             self._show_error(exc)
             return
 
+        self._render_queue(items)
+
+    def _apply_queue_snapshot(self, snapshot: dict) -> None:
+        items = snapshot.get("queued", [])
+        self._render_queue(items)
+
+    def _render_queue(self, items: list[dict]) -> None:
         self.queue_table.setRowCount(len(items))
 
         for row, item in enumerate(items):
@@ -668,6 +687,7 @@ class ManagerWindow(QMainWindow):
                         Qt.ItemDataRole.UserRole,
                         item.get("id"),
                     )
+
                 self.queue_table.setItem(
                     row,
                     column,
@@ -676,5 +696,5 @@ class ManagerWindow(QMainWindow):
 
         self.queue_table.resizeColumnsToContents()
         self.status_label.setText(
-            f"Queue refreshed - {len(items)} item(s)."
+            f"Queue synchronized - {len(items)} item(s)."
         )
