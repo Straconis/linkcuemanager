@@ -425,7 +425,10 @@ def test_dark_mode_toggle_changes_stylesheet(qtbot):
 
     window.dark_mode_button.setChecked(False)
 
-    assert window.styleSheet() == ""
+    assert window.styleSheet()
+    assert "LINKCUE MANAGER" in window.styleSheet()
+    assert "Light dashboard theme" in window.styleSheet()
+    assert window.status_label.text() == "Dark mode disabled."
     assert window.status_label.text() == "Dark mode disabled."
 
 
