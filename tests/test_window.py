@@ -17,7 +17,9 @@ def disable_startup_timer(monkeypatch):
 
 
 
-def test_window_identity(qtbot):
+def test_window_identity(qtbot, monkeypatch):
+    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
+
     window = ManagerWindow()
     qtbot.addWidget(window)
 

@@ -1,3 +1,4 @@
+import os
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QFormLayout,
@@ -31,7 +32,11 @@ class ManagerWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1000, 700)
 
-        self.bot_client = BotClient(DEFAULT_BOT_URL)
+        base_url = os.getenv(
+            "LINKCUE_BOT_URL",
+            DEFAULT_BOT_URL,
+        )
+        self.bot_client = BotClient(base_url)
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -54,7 +59,7 @@ class ManagerWindow(QMainWindow):
         )
 
         self.queue_event_listener = QueueEventListener(
-            DEFAULT_BOT_URL,
+            base_url,
             self.queue_refresh_requested.emit,
         )
         self.queue_event_listener.start()
@@ -68,7 +73,7 @@ class ManagerWindow(QMainWindow):
 
         layout.addWidget(QLabel("Bot URL:"))
 
-        self.bot_url_input = QLineEdit(DEFAULT_BOT_URL)
+        self.bot_url_input = QLineEdit(self.bot_client.base_url)
         self.bot_url_input.setObjectName("botUrlInput")
         layout.addWidget(self.bot_url_input, 1)
 
