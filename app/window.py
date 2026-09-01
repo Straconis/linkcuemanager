@@ -258,9 +258,23 @@ class ManagerWindow(QMainWindow):
             self.remove_selected
         )
 
+        self.move_up_button = QPushButton("Move Up")
+        self.move_up_button.setObjectName("moveUpButton")
+        self.move_up_button.clicked.connect(
+            self.move_selected_up
+        )
+
+        self.move_down_button = QPushButton("Move Down")
+        self.move_down_button.setObjectName("moveDownButton")
+        self.move_down_button.clicked.connect(
+            self.move_selected_down
+        )
+
         controls.addWidget(self.queue_url_input, 1)
         controls.addWidget(self.add_queue_button)
         controls.addWidget(self.add_next_button)
+        controls.addWidget(self.move_up_button)
+        controls.addWidget(self.move_down_button)
         controls.addWidget(self.remove_selected_button)
 
         layout.addLayout(controls)
@@ -573,6 +587,76 @@ class ManagerWindow(QMainWindow):
         self.queue_url_input.clear()
         self.refresh_queue()
         self.status_label.setText("Video added next.")
+
+    def _move_selected(self, delta: int) -> None:
+        row = self.queue_table.currentRow()
+
+        if row < 0:
+            self.status_label.setText("Select a queue item first.")
+            return
+
+        first_item = self.queue_table.item(row, 0)
+
+        if first_item is None:
+            self.status_label.setText("Selected queue item is invalid.")
+            return
+
+        item_id = first_item.data(Qt.ItemDataRole.UserRole)
+
+        if item_id is None:
+            self.status_label.setText("Selected queue item has no ID.")
+            return
+
+        position_item = self.queue_table.item(
+            row,
+            0,
+        )
+
+        if position_item is None:
+            self.status_label.setText("Selected queue item has no position.")
+            return
+
+        try:
+            current_position = int(position_item.text())
+        except ValueError:
+            self.status_label.setText(
+                "Selected queue item has an invalid position."
+            )
+            return
+
+        target_position = current_position + delta
+
+        if target_position < 1:
+            self.status_label.setText("Queue item is already at the top.")
+            return
+
+        if target_position > self.queue_table.rowCount():
+            self.status_label.setText("Queue item is already at the bottom.")
+            return
+
+        self._update_client()
+
+        try:
+            self.bot_client.move_queue_item(
+                int(item_id),
+                target_position,
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self.refresh_queue()
+
+        if delta < 0:
+            self.status_label.setText("Queue item moved up.")
+        else:
+            self.status_label.setText("Queue item moved down.")
+
+    def move_selected_up(self) -> None:
+        self._move_selected(-1)
+
+    def move_selected_down(self) -> None:
+        self._move_selected(1)
 
     def remove_selected(self) -> None:
         row = self.queue_table.currentRow()

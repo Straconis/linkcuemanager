@@ -150,6 +150,8 @@ def test_window_has_queue_controls(qtbot):
     assert window.queue_url_input is not None
     assert window.add_queue_button.text() == "Add to Queue"
     assert window.add_next_button.text() == "Add Next"
+    assert window.move_up_button.text() == "Move Up"
+    assert window.move_down_button.text() == "Move Down"
     assert window.remove_selected_button.text() == "Remove Selected"
 
 
@@ -214,6 +216,147 @@ def test_add_next_moves_new_item_to_front(qtbot):
         ("move", 42, 1),
     ]
     assert window.status_label.text() == "Video added next."
+
+
+def test_move_selected_up_uses_hidden_item_id(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    moved = []
+
+    class FakeClient:
+        def move_queue_item(self, item_id, position):
+            moved.append((item_id, position))
+            return {
+                "status": "moved",
+                "id": item_id,
+                "position": position,
+            }
+
+        def queue(self):
+            return []
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.queue_table.setRowCount(2)
+
+    first = QTableWidgetItem("1")
+    first.setData(Qt.ItemDataRole.UserRole, 10)
+    window.queue_table.setItem(0, 0, first)
+
+    second = QTableWidgetItem("2")
+    second.setData(Qt.ItemDataRole.UserRole, 42)
+    window.queue_table.setItem(1, 0, second)
+
+    window.queue_table.selectRow(1)
+
+    window.move_selected_up()
+
+    assert moved == [(42, 1)]
+    assert window.status_label.text() == "Queue item moved up."
+
+
+def test_move_selected_down_uses_hidden_item_id(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    moved = []
+
+    class FakeClient:
+        def move_queue_item(self, item_id, position):
+            moved.append((item_id, position))
+            return {
+                "status": "moved",
+                "id": item_id,
+                "position": position,
+            }
+
+        def queue(self):
+            return []
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.queue_table.setRowCount(2)
+
+    first = QTableWidgetItem("1")
+    first.setData(Qt.ItemDataRole.UserRole, 10)
+    window.queue_table.setItem(0, 0, first)
+
+    second = QTableWidgetItem("2")
+    second.setData(Qt.ItemDataRole.UserRole, 42)
+    window.queue_table.setItem(1, 0, second)
+
+    window.queue_table.selectRow(0)
+
+    window.move_selected_down()
+
+    assert moved == [(10, 2)]
+    assert window.status_label.text() == "Queue item moved down."
+
+
+def test_move_selected_up_rejects_top_item(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    moved = []
+
+    class FakeClient:
+        def move_queue_item(self, item_id, position):
+            moved.append((item_id, position))
+            return {}
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.queue_table.setRowCount(2)
+
+    item = QTableWidgetItem("1")
+    item.setData(Qt.ItemDataRole.UserRole, 42)
+    window.queue_table.setItem(0, 0, item)
+    window.queue_table.selectRow(0)
+
+    window.move_selected_up()
+
+    assert moved == []
+    assert window.status_label.text() == "Queue item is already at the top."
+
+
+def test_move_selected_down_rejects_bottom_item(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    moved = []
+
+    class FakeClient:
+        def move_queue_item(self, item_id, position):
+            moved.append((item_id, position))
+            return {}
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.queue_table.setRowCount(2)
+
+    item = QTableWidgetItem("2")
+    item.setData(Qt.ItemDataRole.UserRole, 42)
+    window.queue_table.setItem(1, 0, item)
+    window.queue_table.selectRow(1)
+
+    window.move_selected_down()
+
+    assert moved == []
+    assert window.status_label.text() == "Queue item is already at the bottom."
+
+
+def test_move_selected_requires_selection(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    window.move_selected_up()
+
+    assert window.status_label.text() == "Select a queue item first."
 
 
 def test_remove_selected_uses_hidden_item_id(qtbot):
