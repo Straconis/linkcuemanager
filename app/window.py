@@ -1,13 +1,17 @@
+import csv
 import os
+from urllib.parse import urlsplit
 from PySide6.QtCore import QTimer, Qt, Signal
+from datetime import datetime
 from PySide6.QtWidgets import (
-    QFormLayout,
+    QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QTableWidget,
@@ -22,6 +26,20 @@ from app.queue_event_listener import (
     QueueEventListener,
     websocket_events_url,
 )
+from app.pages.about_page import build_about_page
+from app.pages.add_video_dialog import AddVideoDialog
+from app.pages.bot_page import BotPage
+from app.pages.queue_page import QueuePage
+from app.pages.manager_page import ManagerPage
+from app.pages.player_page import PlayerPage
+from app.pages.streamer_page import StreamerPage
+from app.pages.twitch_page import TwitchPage
+from app.settings_store import (
+    load_manager_settings,
+    load_shared_settings,
+    save_manager_settings,
+    save_shared_settings,
+)
 
 
 class ManagerWindow(QMainWindow):
@@ -33,11 +51,43 @@ class ManagerWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1000, 700)
 
-        base_url = os.getenv(
+        self.shared_settings = load_shared_settings()
+        self.manager_settings = load_manager_settings()
+
+        configured_url = os.getenv(
             "LINKCUE_BOT_URL",
-            DEFAULT_BOT_URL,
+            self.shared_settings.get(
+                "bot_url",
+                DEFAULT_BOT_URL,
+            ),
         )
-        self.bot_client = BotClient(base_url)
+
+        parsed_url = urlsplit(configured_url)
+
+        scheme = parsed_url.scheme or "http"
+        hostname = parsed_url.hostname or "127.0.0.1"
+
+        configured_port = os.getenv(
+            "LINKCUE_BOT_PORT"
+        )
+
+        if configured_port is None:
+            configured_port = self.shared_settings.get(
+                "bot_port"
+            )
+
+        if configured_port is None:
+            try:
+                configured_port = parsed_url.port
+            except ValueError:
+                configured_port = None
+
+        bot_port = int(configured_port or 8000)
+        base_url = f"{scheme}://{hostname}"
+
+        self.bot_client = BotClient(
+            f"{base_url}:{bot_port}"
+        )
 
         root = QWidget()
         root.setObjectName("managerRoot")
@@ -73,12 +123,13 @@ class ManagerWindow(QMainWindow):
         self.navigation_buttons = {}
 
         for key, label in (
-            ("queue", "?  Queue"),
-            ("bot", "?  Bot"),
-            ("twitch", "?  Twitch"),
-            ("streamer", "?  Streamer"),
-            ("player", "?  Player"),
-            ("about", "?  About"),
+            ("queue", "Queue"),
+            ("manager", "Manager"),
+            ("bot", "Bot"),
+            ("streamer", "Streamer"),
+            ("twitch", "Twitch"),
+            ("player", "Player"),
+            ("about", "About"),
         ):
             button = QPushButton(label)
             button.setObjectName("navigationButton")
@@ -87,14 +138,6 @@ class ManagerWindow(QMainWindow):
             self.navigation_buttons[key] = button
 
         navigation_layout.addStretch()
-
-        self.dark_mode_button = QPushButton("Dark Mode")
-        self.dark_mode_button.setObjectName("darkModeButton")
-        self.dark_mode_button.setCheckable(True)
-        self.dark_mode_button.toggled.connect(
-            self.set_dark_mode
-        )
-        navigation_layout.addWidget(self.dark_mode_button)
 
         root_layout.addWidget(self.navigation)
 
@@ -105,102 +148,159 @@ class ManagerWindow(QMainWindow):
         self.page_stack = QStackedWidget()
         self.page_stack.setObjectName("pageStack")
 
-        self.queue_page = QWidget()
-        queue_layout = QVBoxLayout(self.queue_page)
-        queue_layout.setContentsMargins(18, 18, 18, 12)
-        queue_layout.setSpacing(10)
-
-        self.queue_page_title = QLabel("QUEUE MANAGEMENT")
-        self.queue_page_title.setObjectName("pageTitle")
-        queue_layout.addWidget(self.queue_page_title)
-
-        queue_layout.addWidget(self._build_queue_section(), 1)
-
-        self.bot_page = QWidget()
-        bot_layout = QVBoxLayout(self.bot_page)
-        bot_layout.setContentsMargins(18, 18, 18, 12)
-        bot_layout.addWidget(self._build_bot_section())
-        bot_layout.addStretch()
-
-        self.twitch_page = QWidget()
-        twitch_layout = QVBoxLayout(self.twitch_page)
-        twitch_layout.setContentsMargins(18, 18, 18, 12)
-        twitch_layout.addWidget(self._build_twitch_section())
-        twitch_layout.addStretch()
-
-        self.player_page = QWidget()
-        player_layout = QVBoxLayout(self.player_page)
-        player_layout.setContentsMargins(18, 18, 18, 12)
-        player_layout.addWidget(self._build_player_section())
-        player_layout.addStretch()
-
-        self.streamer_page = QWidget()
-        streamer_layout = QVBoxLayout(self.streamer_page)
-        streamer_layout.setContentsMargins(18, 18, 18, 12)
-
-        streamer_title = QLabel("STREAMER")
-        streamer_title.setObjectName("pageTitle")
-        streamer_layout.addWidget(streamer_title)
-
-        streamer_info = QLabel(
-            "Streamer-specific controls will appear here."
+        self.queue_page = QueuePage(
+            self.refresh_queue,
+            self.show_add_video_dialog,
+            self.refresh_queue_metadata,
+            self.export_queue_csv,
+            self.export_history_csv,
+            self.import_queue_csv,
+            self.move_selected_to_beginning,
+            self.move_selected_up,
+            self.move_selected_down,
+            self.move_selected_to_end,
+            self.remove_selected,
+            self.clear_queue,
         )
-        streamer_info.setObjectName("pageDescription")
-        streamer_layout.addWidget(streamer_info)
-        streamer_layout.addStretch()
 
-        self.about_page = QWidget()
-        about_layout = QVBoxLayout(self.about_page)
-        about_layout.setContentsMargins(18, 18, 18, 12)
-
-        about_title = QLabel("ABOUT LINKCUE")
-        about_title.setObjectName("pageTitle")
-        about_layout.addWidget(about_title)
-
-        about_info = QLabel(
-            f"{APP_NAME} {APP_VERSION}\n\n"
-            "Central management console for the LinkCue Bot."
+        self.manager_page = ManagerPage(
+            self.set_dark_mode,
+            self.save_manager_preferences,
+            self.restore_manager_defaults,
         )
-        about_info.setObjectName("pageDescription")
-        about_layout.addWidget(about_info)
-        about_layout.addStretch()
+
+        self.bot_page = BotPage(
+            base_url,
+            bot_port,
+            self.save_bot_url,
+            self.test_connection,
+            self.toggle_public_web,
+            self.refresh_public_web_setting,
+            self.save_logging_setting,
+            self.refresh_logging_setting,
+            self.restart_bot,
+        )
+
+        self.twitch_page = TwitchPage(
+            self.join_channel,
+            self.leave_channel,
+            self.refresh_twitch_status,
+        )
+
+        self.player_page = PlayerPage(
+            self.refresh_player_status
+        )
+
+        self.streamer_page = StreamerPage(
+            self.save_streamer_settings
+        )
+
+        self.about_page = build_about_page()
 
         for page in (
             self.queue_page,
+            self.manager_page,
             self.bot_page,
-            self.twitch_page,
             self.streamer_page,
+            self.twitch_page,
             self.player_page,
             self.about_page,
         ):
             self.page_stack.addWidget(page)
 
-        root_layout.addWidget(self.page_stack, 1)
+        content_layout = QVBoxLayout()
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
+        content_layout.addWidget(self.page_stack, 1)
 
         self.status_label = QLabel("Ready")
         self.status_label.setObjectName("statusLabel")
+        content_layout.addWidget(self.status_label)
+
+        root_layout.addLayout(content_layout, 1)
 
         self.navigation_buttons["queue"].clicked.connect(
             lambda: self._show_page(0, "queue")
         )
-        self.navigation_buttons["bot"].clicked.connect(
-            lambda: self._show_page(1, "bot")
+        self.navigation_buttons["manager"].clicked.connect(
+            lambda: self._show_page(1, "manager")
         )
-        self.navigation_buttons["twitch"].clicked.connect(
-            lambda: self._show_page(2, "twitch")
+        self.navigation_buttons["bot"].clicked.connect(
+            lambda: self._show_page(2, "bot")
         )
         self.navigation_buttons["streamer"].clicked.connect(
             lambda: self._show_page(3, "streamer")
         )
+        self.navigation_buttons["twitch"].clicked.connect(
+            lambda: self._show_page(4, "twitch")
+        )
         self.navigation_buttons["player"].clicked.connect(
-            lambda: self._show_page(4, "player")
+            lambda: self._show_page(5, "player")
         )
         self.navigation_buttons["about"].clicked.connect(
-            lambda: self._show_page(5, "about")
+            lambda: self._show_page(6, "about")
         )
 
         self._show_page(0, "queue")
-        self.set_dark_mode(False)
+
+        manager_username = str(
+            self.manager_settings.get(
+                "manager_username",
+                "",
+            )
+        )
+
+        dark_mode_enabled = bool(
+            self.manager_settings.get(
+                "dark_mode",
+                False,
+            )
+        )
+
+        self.manager_page.load_settings(
+            manager_username,
+            dark_mode_enabled,
+        )
+
+        streamer_name = str(
+            self.manager_settings.get(
+                "streamer_name",
+                "",
+            )
+        )
+
+        streamer_twitch_url = str(
+            self.manager_settings.get(
+                "streamer_twitch_url",
+                "",
+            )
+        )
+
+        populate_from_twitch = bool(
+            self.manager_settings.get(
+                "populate_from_twitch_url",
+                False,
+            )
+        )
+
+        self.streamer_page.load_settings(
+            streamer_name,
+            streamer_twitch_url,
+            populate_from_twitch,
+        )
+
+        if (
+            populate_from_twitch
+            and streamer_name
+        ):
+            self.twitch_page.set_channel(
+                streamer_name
+            )
+
+        self.set_dark_mode(
+            dark_mode_enabled
+        )
 
         self.queue_refresh_requested.connect(
             self.refresh_queue
@@ -212,237 +312,17 @@ class ManagerWindow(QMainWindow):
         )
         self.queue_event_listener.start()
 
-        # Establish the initial Player state once the UI event loop starts.
+        # Establish initial state once the UI event loop starts.
+        QTimer.singleShot(0, self.refresh_queue)
         QTimer.singleShot(0, self.refresh_player_status)
-
-    def _build_bot_section(self) -> QGroupBox:
-        group = QGroupBox("LinkCue Bot")
-        layout = QHBoxLayout(group)
-
-        layout.addWidget(QLabel("Bot URL:"))
-
-        self.bot_url_input = QLineEdit(self.bot_client.base_url)
-        self.bot_url_input.setObjectName("botUrlInput")
-        layout.addWidget(self.bot_url_input, 1)
-
-        self.test_connection_button = QPushButton("Test Connection")
-        self.test_connection_button.setObjectName(
-            "testConnectionButton"
+        QTimer.singleShot(
+            0,
+            self.refresh_public_web_setting,
         )
-        self.test_connection_button.clicked.connect(
-            self.test_connection
+        QTimer.singleShot(
+            0,
+            self.refresh_logging_setting,
         )
-        layout.addWidget(self.test_connection_button)
-
-        layout.addWidget(QLabel("Status:"))
-
-        self.bot_status_label = QLabel("Not checked")
-        self.bot_status_label.setObjectName("botStatusLabel")
-        self.bot_status_label.setMinimumWidth(120)
-        layout.addWidget(self.bot_status_label)
-
-        return group
-
-    def _build_player_section(self) -> QGroupBox:
-        group = QGroupBox("LinkCue Player")
-        layout = QHBoxLayout(group)
-
-        layout.addWidget(QLabel("Player:"))
-
-        self.player_status_label = QLabel("Not checked")
-        self.player_status_label.setObjectName(
-            "playerStatusLabel"
-        )
-        layout.addWidget(self.player_status_label)
-
-        layout.addSpacing(20)
-        layout.addWidget(QLabel("Playback:"))
-
-        self.playback_status_label = QLabel("Not checked")
-        self.playback_status_label.setObjectName(
-            "playbackStatusLabel"
-        )
-        layout.addWidget(self.playback_status_label)
-
-        layout.addSpacing(20)
-        layout.addWidget(QLabel("Now Playing:"))
-
-        self.now_playing_label = QLabel("None")
-        self.now_playing_label.setObjectName(
-            "nowPlayingLabel"
-        )
-        layout.addWidget(self.now_playing_label, 1)
-
-        self.refresh_player_button = QPushButton("Refresh Player")
-        self.refresh_player_button.setObjectName(
-            "refreshPlayerButton"
-        )
-        self.refresh_player_button.clicked.connect(
-            self.refresh_player_status
-        )
-        layout.addWidget(self.refresh_player_button)
-
-        return group
-
-    def _build_twitch_section(self) -> QGroupBox:
-        group = QGroupBox("Twitch Channels")
-        layout = QVBoxLayout(group)
-
-        controls = QHBoxLayout()
-
-        self.channel_input = QLineEdit()
-        self.channel_input.setObjectName("channelInput")
-        self.channel_input.setPlaceholderText(
-            "Twitch channel name"
-        )
-
-        self.join_button = QPushButton("Join Channel")
-        self.join_button.setObjectName("joinButton")
-        self.join_button.clicked.connect(
-            self.join_channel
-        )
-
-        self.leave_button = QPushButton("Leave Channel")
-        self.leave_button.setObjectName("leaveButton")
-        self.leave_button.clicked.connect(
-            self.leave_channel
-        )
-
-        self.refresh_twitch_button = QPushButton("Refresh")
-        self.refresh_twitch_button.setObjectName(
-            "refreshTwitchButton"
-        )
-        self.refresh_twitch_button.clicked.connect(
-            self.refresh_twitch_status
-        )
-
-        controls.addWidget(self.channel_input, 1)
-        controls.addWidget(self.join_button)
-        controls.addWidget(self.leave_button)
-        controls.addWidget(self.refresh_twitch_button)
-
-        layout.addLayout(controls)
-
-        self.twitch_status_label = QLabel("Not checked")
-        self.twitch_status_label.setObjectName(
-            "twitchStatusLabel"
-        )
-        layout.addWidget(self.twitch_status_label)
-
-        self.channel_list = QListWidget()
-        self.channel_list.setObjectName("channelList")
-        self.channel_list.setMaximumHeight(90)
-        layout.addWidget(self.channel_list)
-
-        return group
-
-    def _build_queue_section(self) -> QGroupBox:
-        group = QGroupBox("Queue")
-        layout = QVBoxLayout(group)
-
-        header = QHBoxLayout()
-
-        title = QLabel("Current Bot Queue")
-        title.setStyleSheet("font-weight: bold;")
-
-        self.player_count_label = QLabel("Players Connected: 0")
-        self.player_count_label.setObjectName("playerCountLabel")
-
-        self.manager_count_label = QLabel("Managers Connected: 0 (including this instance)")
-        self.manager_count_label.setObjectName("managerCountLabel")
-
-
-        self.refresh_queue_button = QPushButton("Refresh Queue")
-        self.refresh_queue_button.setObjectName(
-            "refreshQueueButton"
-        )
-        self.refresh_queue_button.clicked.connect(
-            self.refresh_queue
-        )
-
-        header.addWidget(title)
-        header.addStretch()
-        header.addWidget(self.player_count_label)
-        header.addSpacing(12)
-        header.addWidget(self.manager_count_label)
-        header.addSpacing(12)
-        header.addWidget(self.refresh_queue_button)
-
-        layout.addLayout(header)
-
-        controls = QHBoxLayout()
-
-        self.queue_url_input = QLineEdit()
-        self.queue_url_input.setObjectName("queueUrlInput")
-        self.queue_url_input.setPlaceholderText(
-            "YouTube or TikTok URL"
-        )
-
-        self.add_queue_button = QPushButton("Add to Queue")
-        self.add_queue_button.setObjectName("addQueueButton")
-        self.add_queue_button.clicked.connect(
-            self.add_to_queue
-        )
-
-        self.add_next_button = QPushButton("Add Next")
-        self.add_next_button.setObjectName("addNextButton")
-        self.add_next_button.clicked.connect(
-            self.add_next
-        )
-
-        self.remove_selected_button = QPushButton("Remove Selected")
-        self.remove_selected_button.setObjectName(
-            "removeSelectedButton"
-        )
-        self.remove_selected_button.clicked.connect(
-            self.remove_selected
-        )
-
-        self.move_up_button = QPushButton("Move Up")
-        self.move_up_button.setObjectName("moveUpButton")
-        self.move_up_button.clicked.connect(
-            self.move_selected_up
-        )
-
-        self.move_down_button = QPushButton("Move Down")
-        self.move_down_button.setObjectName("moveDownButton")
-        self.move_down_button.clicked.connect(
-            self.move_selected_down
-        )
-
-        controls.addWidget(self.queue_url_input, 1)
-        controls.addWidget(self.add_queue_button)
-        controls.addWidget(self.add_next_button)
-        controls.addWidget(self.move_up_button)
-        controls.addWidget(self.move_down_button)
-        controls.addWidget(self.remove_selected_button)
-
-        layout.addLayout(controls)
-
-        self.queue_table = QTableWidget(0, 5)
-        self.queue_table.setObjectName("queueTable")
-        self.queue_table.setHorizontalHeaderLabels(
-            [
-                "Position",
-                "Title",
-                "Platform",
-                "Submitted By",
-                "Status",
-            ]
-        )
-        self.queue_table.setEditTriggers(
-            QTableWidget.EditTrigger.NoEditTriggers
-        )
-        self.queue_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
-        )
-        self.queue_table.horizontalHeader().setStretchLastSection(
-            True
-        )
-
-        layout.addWidget(self.queue_table)
-
-        return group
 
     def _show_page(self, index: int, key: str) -> None:
         self.page_stack.setCurrentIndex(index)
@@ -543,6 +423,10 @@ class ManagerWindow(QMainWindow):
                 QLabel#pageDescription {
                     color: #8993a5;
                     font-size: 13px;
+                }
+
+                QGroupBox QLabel {
+                    color: #d7dde8;
                 }
 
                 /* -----------------------------------------------------
@@ -699,8 +583,22 @@ class ManagerWindow(QMainWindow):
                     padding: 5px;
                 }
 
+                QLabel#queuePositionBadge {
+                    background-color: #151a22;
+                    color: #f1f3f5;
+                    border: 1px solid #486581;
+                    border-radius: 6px;
+                    font-weight: 600;
+                    font-size: 14px;
+                }
+
                 QLabel#statusLabel {
-                    color: #727d90;
+                    background-color: #171b22;
+                    color: #aeb8c7;
+                    border: 1px solid #2b3442;
+                    border-radius: 5px;
+                    padding: 7px 10px;
+                    margin: 6px 8px 8px 8px;
                     font-size: 11px;
                 }
 
@@ -998,15 +896,30 @@ class ManagerWindow(QMainWindow):
                     color: #66758a;
                 }
 
+                QLabel#queuePositionBadge {
+                    background-color: #eef3f8;
+                    color: #203040;
+                    border: 1px solid #9eb3c9;
+                    border-radius: 6px;
+                    font-weight: 600;
+                    font-size: 14px;
+                }
+
                 QLabel#statusLabel {
-                    color: #687789;
+                    background-color: #ffffff;
+                    color: #4f5d6d;
+                    border: 1px solid #cbd3dd;
+                    border-radius: 5px;
+                    padding: 7px 10px;
+                    margin: 6px 8px 8px 8px;
+                    font-size: 11px;
                 }
                 """
             )
             self.status_label.setText("Dark mode disabled.")
 
     def _update_client(self) -> None:
-        base_url = self.bot_url_input.text().strip()
+        base_url = self.bot_page.bot_url()
 
         self.bot_client = BotClient(base_url)
 
@@ -1025,6 +938,30 @@ class ManagerWindow(QMainWindow):
     def _stop_background_services(self) -> None:
         self.queue_event_listener.stop()
 
+    def save_manager_preferences(self) -> None:
+        manager_settings = load_manager_settings()
+        manager_settings["manager_username"] = (
+            self.manager_page.manager_username()
+        )
+        manager_settings["dark_mode"] = (
+            self.manager_page.dark_mode_enabled()
+        )
+
+        save_manager_settings(manager_settings)
+        self.manager_settings = manager_settings
+
+        self.status_label.setText(
+            "Manager settings saved."
+        )
+
+    def restore_manager_defaults(self) -> None:
+        self.manager_page.restore_defaults()
+
+        self.status_label.setText(
+            "Manager defaults restored. "
+            "Save Settings to make them permanent."
+        )
+
     def closeEvent(self, event) -> None:
         self._stop_background_services()
         super().closeEvent(event)
@@ -1032,21 +969,255 @@ class ManagerWindow(QMainWindow):
     def _show_error(self, exc: Exception) -> None:
         self.status_label.setText(str(exc))
 
+    def save_bot_url(self) -> None:
+        bot_host = self.bot_page.bot_host()
+        bot_port = self.bot_page.bot_port()
+
+        if not bot_host:
+            parsed_default = urlsplit(
+                DEFAULT_BOT_URL
+            )
+
+            scheme = (
+                parsed_default.scheme
+                or "http"
+            )
+            hostname = (
+                parsed_default.hostname
+                or "127.0.0.1"
+            )
+
+            bot_host = (
+                f"{scheme}://{hostname}"
+            )
+
+        public_web_port = (
+            self.bot_page.public_web_port()
+        )
+        public_web_enabled = (
+            self.bot_page.requested_public_web_enabled()
+        )
+
+        try:
+            result = self.bot_client.set_bot_connection(
+                bot_host,
+                bot_port,
+            )
+
+            public_web_result = (
+                self.bot_client.set_public_web_enabled(
+                    public_web_enabled,
+                    public_web_port,
+                )
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        shared_settings = load_shared_settings()
+        shared_settings["bot_url"] = bot_host
+        shared_settings["bot_port"] = bot_port
+        save_shared_settings(shared_settings)
+
+        self.shared_settings = shared_settings
+
+        self._apply_public_web_setting(
+            bool(
+                public_web_result.get(
+                    "enabled"
+                )
+            ),
+            public_web_result.get("port"),
+        )
+
+        restart_required = bool(
+            result.get("restart_required")
+        )
+
+        self.status_label.setText(
+            "Bot settings saved. Bot restart required."
+            if restart_required
+            else "Bot settings saved."
+        )
+
     def test_connection(self) -> None:
         self._update_client()
 
         try:
             result = self.bot_client.health()
         except BotClientError as exc:
-            self.bot_status_label.setText("Offline")
+            self.bot_page.set_connection_offline()
             self._show_error(exc)
             return
 
         version = result.get("version", "unknown")
-        self.bot_status_label.setText(
-            f"Connected - Bot {version}"
+        self.bot_page.set_connection_version(
+            str(version)
         )
         self.status_label.setText("Bot connection successful.")
+
+    def _apply_public_web_setting(
+        self,
+        enabled: bool,
+        port: int | None = None,
+    ) -> None:
+        self.bot_page.apply_public_web_setting(
+            enabled,
+            port,
+        )
+
+    def refresh_public_web_setting(self) -> None:
+        self._update_client()
+
+        try:
+            result = self.bot_client.public_web_setting()
+        except BotClientError as exc:
+            self.bot_page.set_public_web_unavailable()
+            self._show_error(exc)
+            return
+
+        self._apply_public_web_setting(
+            bool(result.get("enabled")),
+            result.get("port"),
+        )
+
+        self.status_label.setText(
+            "Public web setting refreshed."
+        )
+
+    def toggle_public_web(self) -> None:
+        self._update_client()
+
+        requested = self.bot_page.requested_public_web_enabled()
+
+        try:
+            result = self.bot_client.set_public_web_enabled(
+                requested,
+                self.bot_page.public_web_port(),
+            )
+        except BotClientError as exc:
+            self.refresh_public_web_setting()
+            self._show_error(exc)
+            return
+
+        enabled = bool(result.get("enabled"))
+        self._apply_public_web_setting(
+            enabled,
+            result.get("port"),
+        )
+
+        self.status_label.setText(
+            "Public web enabled."
+            if enabled
+            else "Public web disabled."
+        )
+
+    def _apply_logging_setting(
+        self,
+        enabled: bool,
+        timezone_name: str,
+    ) -> None:
+        self.bot_page.apply_logging_setting(
+            enabled,
+            timezone_name,
+        )
+
+
+    def refresh_logging_setting(self) -> None:
+        self._update_client()
+
+        try:
+            result = self.bot_client.logging_setting()
+        except BotClientError as exc:
+            self.bot_page.set_logging_unavailable()
+            self._show_error(exc)
+            return
+
+        self._apply_logging_setting(
+            bool(result.get("enabled")),
+            str(
+                result.get(
+                    "timezone",
+                    "America/Detroit",
+                )
+            ),
+        )
+
+        self.status_label.setText(
+            "Logging setting refreshed."
+        )
+
+
+    def save_logging_setting(self) -> None:
+        self._update_client()
+
+        try:
+            result = self.bot_client.set_logging_setting(
+                self.bot_page.requested_logging_enabled(),
+                self.bot_page.logging_timezone(),
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self._apply_logging_setting(
+            bool(result.get("enabled")),
+            str(
+                result.get(
+                    "timezone",
+                    "America/Detroit",
+                )
+            ),
+        )
+
+        self.status_label.setText(
+            "Logging settings saved."
+        )
+
+
+    def restart_bot(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        message_box = QMessageBox(self)
+        message_box.setWindowTitle("Restart Bot")
+        message_box.setIcon(QMessageBox.Icon.Information)
+        message_box.setText(
+            "Restart Bot control is not implemented yet.\n\n"
+            "This button is a development placeholder.\n"
+            "No restart will occur."
+        )
+        message_box.setStandardButtons(
+            QMessageBox.StandardButton.Ok
+        )
+        message_box.setStyleSheet(
+            """
+            QMessageBox {
+                background-color: #1e232b;
+            }
+
+            QMessageBox QLabel {
+                color: #d7dde8;
+            }
+
+            QMessageBox QPushButton {
+                background-color: #2b313b;
+                color: #f2f4f8;
+                border: 1px solid #48515f;
+                border-radius: 6px;
+                padding: 6px 14px;
+                min-width: 70px;
+            }
+
+            QMessageBox QPushButton:hover {
+                background-color: #343b46;
+            }
+
+            QMessageBox QPushButton:pressed {
+                background-color: #252b33;
+            }
+            """
+        )
+        message_box.exec()
 
     def refresh_player_status(self) -> None:
         self._update_client()
@@ -1055,38 +1226,96 @@ class ManagerWindow(QMainWindow):
             presence = self.bot_client.player_status()
             playback = self.bot_client.player_state()
         except BotClientError as exc:
-            self.player_status_label.setText("Offline")
-            self.playback_status_label.setText("Unknown")
-            self.now_playing_label.setText("None")
+            self.player_page.show_unavailable()
             self._show_error(exc)
             return
 
-        if presence.get("active"):
-            self.player_status_label.setText("Active")
-        else:
-            self.player_status_label.setText("Offline")
+        self.player_page.apply_status(
+            presence,
+            playback,
+        )
 
-        state = playback.get("state", "unknown")
+        self.status_label.setText(
+            "Player status refreshed."
+        )
 
-        if state == "playing":
-            self.playback_status_label.setText("Playing")
-        elif state == "idle":
-            self.playback_status_label.setText("Idle")
-        else:
-            self.playback_status_label.setText(
-                str(state).title()
+
+    def save_streamer_settings(self) -> None:
+        streamer_name = (
+            self.streamer_page.streamer_name()
+        )
+        twitch_url = (
+            self.streamer_page.twitch_url()
+        )
+        populate_from_twitch = (
+            self.streamer_page.populate_from_twitch_enabled()
+        )
+
+        if populate_from_twitch:
+            parse_url = twitch_url
+
+            if "://" not in parse_url:
+                parse_url = f"https://{parse_url}"
+
+            parsed = urlsplit(parse_url)
+
+            hostname = (
+                parsed.hostname or ""
+            ).lower()
+
+            valid_hosts = {
+                "twitch.tv",
+                "www.twitch.tv",
+                "m.twitch.tv",
+            }
+
+            path_parts = [
+                part
+                for part in parsed.path.split("/")
+                if part
+            ]
+
+            if (
+                hostname not in valid_hosts
+                or not path_parts
+            ):
+                self.status_label.setText(
+                    "Unable to populate fields: "
+                    "enter a valid Twitch channel URL."
+                )
+                return
+
+            streamer_name = path_parts[0]
+
+            self.streamer_page.set_streamer_name(
+                streamer_name
             )
 
-        item = playback.get("item")
+            self.twitch_page.set_channel(
+                streamer_name
+            )
 
-        if item:
-            title = item.get("title") or item.get("url") or "Untitled video"
-            self.now_playing_label.setText(str(title))
-        else:
-            self.now_playing_label.setText("None")
+        manager_settings = load_manager_settings()
 
-        self.status_label.setText("Player status refreshed.")
+        manager_settings["streamer_name"] = (
+            streamer_name
+        )
+        manager_settings["streamer_twitch_url"] = (
+            twitch_url
+        )
+        manager_settings["populate_from_twitch_url"] = (
+            populate_from_twitch
+        )
 
+        save_manager_settings(
+            manager_settings
+        )
+
+        self.manager_settings = manager_settings
+
+        self.status_label.setText(
+            "Streamer settings saved."
+        )
 
     def refresh_twitch_status(self) -> None:
         self._update_client()
@@ -1097,24 +1326,17 @@ class ManagerWindow(QMainWindow):
             self._show_error(exc)
             return
 
-        channels = result.get("channels", [])
-
-        self.channel_list.clear()
-        self.channel_list.addItems(channels)
-
-        if result.get("connected"):
-            self.twitch_status_label.setText(
-                f"Active - {{len(channels)}} channel(s)"
-            )
-        else:
-            self.twitch_status_label.setText("Inactive")
+        self.twitch_page.apply_status(
+            result,
+            use_connected_flag=True,
+        )
 
         self.status_label.setText(
             "Twitch status refreshed."
         )
 
     def join_channel(self) -> None:
-        channel = self.channel_input.text().strip()
+        channel = self.twitch_page.entered_channel()
 
         if not channel:
             self.status_label.setText(
@@ -1132,17 +1354,14 @@ class ManagerWindow(QMainWindow):
             self._show_error(exc)
             return
 
-        self.channel_input.clear()
+        self.twitch_page.clear_channel_input()
         self._apply_twitch_result(result)
 
     def leave_channel(self) -> None:
-        channel = self.channel_input.text().strip()
+        channel = self.twitch_page.entered_channel()
 
         if not channel:
-            selected = self.channel_list.currentItem()
-
-            if selected is not None:
-                channel = selected.text()
+            channel = self.twitch_page.selected_channel()
 
         if not channel:
             self.status_label.setText(
@@ -1160,126 +1379,457 @@ class ManagerWindow(QMainWindow):
             self._show_error(exc)
             return
 
-        self.channel_input.clear()
+        self.twitch_page.clear_channel_input()
         self._apply_twitch_result(result)
 
     def _apply_twitch_result(self, result: dict) -> None:
-        channels = result.get("channels", [])
-
-        self.channel_list.clear()
-        self.channel_list.addItems(channels)
-
-        if channels:
-            self.twitch_status_label.setText(
-                f"Active - {{len(channels)}} channel(s)"
-            )
-        else:
-            self.twitch_status_label.setText("Inactive")
+        self.twitch_page.apply_status(result)
 
         self.status_label.setText(
             result.get("status", "Twitch state updated.")
         )
 
-    def add_to_queue(self) -> None:
-        url = self.queue_url_input.text().strip()
-
-        if not url:
-            self.status_label.setText("Enter a video URL.")
-            return
-
+    def export_queue_csv(self) -> None:
         self._update_client()
 
         try:
-            self.bot_client.add_queue_item(url)
+            items = self.bot_client.queue()
         except BotClientError as exc:
             self._show_error(exc)
             return
 
-        self.queue_url_input.clear()
-        self.refresh_queue()
-        self.status_label.setText("Video added to queue.")
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
 
-    def add_next(self) -> None:
-        url = self.queue_url_input.text().strip()
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export LinkCue Queue",
+            f"linkcue_queue_{timestamp}.csv",
+            "CSV Files (*.csv)",
+        )
+
+        if not file_path:
+            return
+
+        fieldnames = [
+            "position",
+            "url",
+            "title",
+            "channel",
+            "platform",
+            "duration",
+            "submitted_by",
+            "status",
+        ]
+
+        try:
+            with open(
+                file_path,
+                "w",
+                newline="",
+                encoding="utf-8-sig",
+            ) as csv_file:
+                writer = csv.DictWriter(
+                    csv_file,
+                    fieldnames=fieldnames,
+                    extrasaction="ignore",
+                )
+                writer.writeheader()
+
+                for item in items:
+                    writer.writerow(
+                        {
+                            "position": item.get("position"),
+                            "url": item.get("url"),
+                            "title": item.get("title"),
+                            "channel": (
+                                item.get("video_channel")
+                                or item.get("channel")
+                            ),
+                            "platform": item.get("platform"),
+                            "duration": item.get("duration"),
+                            "submitted_by": item.get(
+                                "submitted_by"
+                            ),
+                            "status": item.get("status"),
+                        }
+                    )
+        except OSError as exc:
+            self.status_label.setText(
+                f"Queue export failed: {exc}"
+            )
+            return
+
+        self.status_label.setText(
+            f"Exported {len(items)} queue item(s)."
+        )
+
+    def export_history_csv(self) -> None:
+        self._update_client()
+
+        try:
+            items = self.bot_client.history()
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export LinkCue History",
+            f"linkcue_history_{timestamp}.csv",
+            "CSV Files (*.csv)",
+        )
+
+        if not file_path:
+            return
+
+        fieldnames = [
+            "url",
+            "title",
+            "channel",
+            "platform",
+            "duration",
+            "submitted_by",
+            "status",
+            "created_at",
+            "started_at",
+            "played_at",
+        ]
+
+        try:
+            with open(
+                file_path,
+                "w",
+                newline="",
+                encoding="utf-8-sig",
+            ) as csv_file:
+                writer = csv.DictWriter(
+                    csv_file,
+                    fieldnames=fieldnames,
+                    extrasaction="ignore",
+                )
+                writer.writeheader()
+
+                for item in items:
+                    writer.writerow(
+                        {
+                            "url": item.get("url"),
+                            "title": item.get("title"),
+                            "channel": (
+                                item.get("video_channel")
+                                or item.get("channel")
+                            ),
+                            "platform": item.get("platform"),
+                            "duration": item.get("duration"),
+                            "submitted_by": item.get(
+                                "submitted_by"
+                            ),
+                            "status": item.get("status"),
+                            "created_at": item.get("created_at"),
+                            "started_at": item.get("started_at"),
+                            "played_at": item.get("played_at"),
+                        }
+                    )
+        except OSError as exc:
+            self.status_label.setText(
+                f"History export failed: {exc}"
+            )
+            return
+
+        self.status_label.setText(
+            f"Exported {len(items)} history item(s)."
+        )
+
+    def import_queue_csv(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import LinkCue Queue",
+            "",
+            "CSV Files (*.csv)",
+        )
+
+        if not file_path:
+            return
+
+        try:
+            with open(
+                file_path,
+                "r",
+                newline="",
+                encoding="utf-8-sig",
+            ) as csv_file:
+                reader = csv.DictReader(csv_file)
+
+                if reader.fieldnames is None:
+                    self.status_label.setText(
+                        "Queue import failed: CSV has no header."
+                    )
+                    return
+
+                normalized_headers = {
+                    header.strip()
+                    for header in reader.fieldnames
+                    if header is not None
+                }
+
+                missing = {
+                    "position",
+                    "url",
+                } - normalized_headers
+
+                if missing:
+                    self.status_label.setText(
+                        "Queue import failed: required column(s) "
+                        + ", ".join(sorted(missing))
+                        + " missing."
+                    )
+                    return
+
+                rows = []
+
+                for line_number, row in enumerate(
+                    reader,
+                    start=2,
+                ):
+                    raw_position = (
+                        row.get("position") or ""
+                    ).strip()
+                    url = (
+                        row.get("url") or ""
+                    ).strip()
+
+                    if not raw_position:
+                        self.status_label.setText(
+                            "Queue import failed: "
+                            f"line {line_number} has no position."
+                        )
+                        return
+
+                    try:
+                        position = int(raw_position)
+                    except ValueError:
+                        self.status_label.setText(
+                            "Queue import failed: "
+                            f"line {line_number} has an invalid position."
+                        )
+                        return
+
+                    if position < 1:
+                        self.status_label.setText(
+                            "Queue import failed: "
+                            f"line {line_number} position must be positive."
+                        )
+                        return
+
+                    if not url:
+                        self.status_label.setText(
+                            "Queue import failed: "
+                            f"line {line_number} has no URL."
+                        )
+                        return
+
+                    rows.append(
+                        {
+                            "position": position,
+                            "url": url,
+                            "title": (
+                                row.get("title") or ""
+                            ).strip(),
+                            "channel": (
+                                row.get("channel") or ""
+                            ).strip(),
+                            "submitted_by": (
+                                row.get("submitted_by") or ""
+                            ).strip(),
+                        }
+                    )
+
+        except (OSError, csv.Error) as exc:
+            self.status_label.setText(
+                f"Queue import failed: {exc}"
+            )
+            return
+
+        positions = [
+            row["position"]
+            for row in rows
+        ]
+
+        if len(positions) != len(set(positions)):
+            self.status_label.setText(
+                "Queue import failed: duplicate positions found."
+            )
+            return
+
+        rows.sort(
+            key=lambda row: row["position"]
+        )
+
+        self._update_client()
+
+        imported = 0
+        already_queued = 0
+        failed = 0
+
+        for row in rows:
+            try:
+                self.bot_client.add_queue_item(
+                    row["url"],
+                    title=row["title"] or None,
+                    video_channel=(
+                        row["channel"] or None
+                    ),
+                    submitted_by=(
+                        row["submitted_by"] or None
+                    ),
+                )
+                imported += 1
+
+            except BotClientError as exc:
+                if exc.status_code == 409:
+                    already_queued += 1
+                else:
+                    failed += 1
+
+        self.refresh_queue()
+
+        self.status_label.setText(
+            "Import complete: "
+            f"{imported} added, "
+            f"{already_queued} already queued, "
+            f"{failed} failed."
+        )
+
+    def show_add_video_dialog(self) -> None:
+        dialog = AddVideoDialog(self)
+
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+
+        url = dialog.video_url()
 
         if not url:
-            self.status_label.setText("Enter a video URL.")
+            self.status_label.setText(
+                "Enter a video URL."
+            )
             return
 
         self._update_client()
 
         try:
-            result = self.bot_client.add_queue_item(url)
-            item_id = result.get("id")
+            result = self.bot_client.add_queue_item(
+                url,
+                submitted_by=(
+                    self.manager_page.manager_username()
+                    or None
+                ),
+            )
 
-            if item_id is None:
-                raise BotClientError(
-                    "Bot did not return a queue item ID"
+            if dialog.behavior() == AddVideoDialog.ADD_NEXT:
+                item_id = result.get("id")
+
+                if item_id is None:
+                    raise BotClientError(
+                        "Bot did not return a queue item ID"
+                    )
+
+                self.bot_client.move_queue_item(
+                    int(item_id),
+                    1,
                 )
 
-            self.bot_client.move_queue_item(
-                int(item_id),
-                1,
-            )
         except BotClientError as exc:
             self._show_error(exc)
             return
 
-        self.queue_url_input.clear()
         self.refresh_queue()
-        self.status_label.setText("Video added next.")
 
-    def _move_selected(self, delta: int) -> None:
-        row = self.queue_table.currentRow()
+        if dialog.behavior() == AddVideoDialog.ADD_NEXT:
+            self.status_label.setText(
+                "Video added next."
+            )
+        else:
+            self.status_label.setText(
+                "Video added to end of queue."
+            )
+
+    def refresh_queue_metadata(self) -> None:
+        self._update_client()
+
+        try:
+            self.bot_client.refresh_queue_metadata()
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self.refresh_queue()
+        self.status_label.setText(
+            "Queue metadata refresh requested."
+        )
+
+    def _selected_queue_item(self) -> tuple[int, int] | None:
+        row = self.queue_page.queue_table.currentRow()
 
         if row < 0:
             self.status_label.setText("Select a queue item first.")
-            return
+            return None
 
-        first_item = self.queue_table.item(row, 0)
+        model_item = self.queue_page.queue_table.item(row, 0)
 
-        if first_item is None:
+        if model_item is None:
             self.status_label.setText("Selected queue item is invalid.")
-            return
+            return None
 
-        item_id = first_item.data(Qt.ItemDataRole.UserRole)
+        item_id = model_item.data(Qt.ItemDataRole.UserRole)
+        position = model_item.data(Qt.ItemDataRole.UserRole + 1)
 
         if item_id is None:
             self.status_label.setText("Selected queue item has no ID.")
-            return
+            return None
 
-        position_item = self.queue_table.item(
-            row,
-            0,
-        )
-
-        if position_item is None:
+        if position is None:
             self.status_label.setText("Selected queue item has no position.")
-            return
+            return None
 
         try:
-            current_position = int(position_item.text())
-        except ValueError:
+            return int(item_id), int(position)
+        except (TypeError, ValueError):
             self.status_label.setText(
-                "Selected queue item has an invalid position."
+                "Selected queue item has invalid queue data."
             )
+            return None
+
+    def _move_selected_to(
+        self,
+        target_position: int,
+        success_message: str,
+    ) -> None:
+        selected = self._selected_queue_item()
+
+        if selected is None:
             return
 
-        target_position = current_position + delta
+        item_id, current_position = selected
+        queue_length = self.queue_page.queue_table.rowCount()
 
         if target_position < 1:
-            self.status_label.setText("Queue item is already at the top.")
-            return
+            target_position = 1
 
-        if target_position > self.queue_table.rowCount():
-            self.status_label.setText("Queue item is already at the bottom.")
+        if target_position > queue_length:
+            target_position = queue_length
+
+        if target_position == current_position:
+            self.status_label.setText(
+                "Queue item is already in that position."
+            )
             return
 
         self._update_client()
 
         try:
             self.bot_client.move_queue_item(
-                int(item_id),
+                item_id,
                 target_position,
             )
         except BotClientError as exc:
@@ -1287,11 +1837,40 @@ class ManagerWindow(QMainWindow):
             return
 
         self.refresh_queue()
+        self.status_label.setText(success_message)
+
+    def _move_selected(self, delta: int) -> None:
+        selected = self._selected_queue_item()
+
+        if selected is None:
+            return
+
+        _, current_position = selected
+        target_position = current_position + delta
+
+        if target_position < 1:
+            self.status_label.setText("Queue item is already at the top.")
+            return
+
+        if target_position > self.queue_page.queue_table.rowCount():
+            self.status_label.setText("Queue item is already at the bottom.")
+            return
 
         if delta < 0:
-            self.status_label.setText("Queue item moved up.")
+            message = "Queue item moved up."
         else:
-            self.status_label.setText("Queue item moved down.")
+            message = "Queue item moved down."
+
+        self._move_selected_to(
+            target_position,
+            message,
+        )
+
+    def move_selected_to_beginning(self) -> None:
+        self._move_selected_to(
+            1,
+            "Queue item moved to beginning.",
+        )
 
     def move_selected_up(self) -> None:
         self._move_selected(-1)
@@ -1299,14 +1878,20 @@ class ManagerWindow(QMainWindow):
     def move_selected_down(self) -> None:
         self._move_selected(1)
 
+    def move_selected_to_end(self) -> None:
+        self._move_selected_to(
+            self.queue_page.queue_table.rowCount(),
+            "Queue item moved to end.",
+        )
+
     def remove_selected(self) -> None:
-        row = self.queue_table.currentRow()
+        row = self.queue_page.queue_table.currentRow()
 
         if row < 0:
             self.status_label.setText("Select a queue item first.")
             return
 
-        first_item = self.queue_table.item(row, 0)
+        first_item = self.queue_page.queue_table.item(row, 0)
 
         if first_item is None:
             self.status_label.setText("Selected queue item is invalid.")
@@ -1330,11 +1915,60 @@ class ManagerWindow(QMainWindow):
         self.status_label.setText("Queue item removed.")
 
 
+    def clear_queue(self) -> None:
+        queue_count = self.queue_page.queue_table.rowCount()
+
+        if queue_count == 0:
+            self.status_label.setText("Queue is already empty.")
+            return
+
+        message_box = QMessageBox(self)
+        message_box.setWindowTitle("Clear Queue")
+        message_box.setIcon(QMessageBox.Icon.Warning)
+        message_box.setText("Clear the entire queue?")
+        message_box.setInformativeText(
+            f"This will remove all {queue_count} queued video(s). "
+            "This cannot be undone."
+        )
+
+        clear_button = message_box.addButton(
+            "Clear Queue",
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        cancel_button = message_box.addButton(
+            "Cancel",
+            QMessageBox.ButtonRole.RejectRole,
+        )
+
+        message_box.setDefaultButton(cancel_button)
+        message_box.setEscapeButton(cancel_button)
+        message_box.exec()
+
+        if message_box.clickedButton() is not clear_button:
+            self.status_label.setText("Clear queue cancelled.")
+            return
+
+        self._update_client()
+
+        try:
+            result = self.bot_client.clear_queue()
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        deleted_count = result.get("deleted_count", 0)
+
+        self.refresh_queue()
+        self.status_label.setText(
+            f"Cleared {deleted_count} queue item(s)."
+        )
+
+
     def _update_presence_counts(self, event: dict) -> None:
-        self.player_count_label.setText(
+        self.queue_page.player_count_label.setText(
             f"Players Connected: {event.get('player_count', 0)}"
         )
-        self.manager_count_label.setText(
+        self.queue_page.manager_count_label.setText(
             f"Managers Connected: {event.get('manager_count', 0)} (including this instance)"
         )
 
@@ -1351,11 +1985,11 @@ class ManagerWindow(QMainWindow):
                     self._apply_queue_snapshot(snapshot)
                     return
             elif event_type == "manager_presence_changed":
-                self.manager_count_label.setText(
+                self.queue_page.manager_count_label.setText(
                     f"Managers Connected: {event.get('manager_count', 0)} (including this instance)"
                 )
             elif event_type == "player_presence_changed":
-                self.player_count_label.setText(
+                self.queue_page.player_count_label.setText(
                     f"Players Connected: {event.get('player_count', 0)}"
                 )
 
@@ -1387,39 +2021,4 @@ class ManagerWindow(QMainWindow):
         self._render_queue(items)
 
     def _render_queue(self, items: list[dict]) -> None:
-        self.queue_table.setRowCount(len(items))
-
-        for row, item in enumerate(items):
-            values = [
-                item.get("position"),
-                item.get("title") or item.get("url"),
-                item.get("platform"),
-                item.get("submitted_by"),
-                item.get("status"),
-            ]
-
-            for column, value in enumerate(values):
-                table_item = QTableWidgetItem(
-                    "" if value is None else str(value)
-                )
-                table_item.setTextAlignment(
-                    Qt.AlignmentFlag.AlignVCenter
-                    | Qt.AlignmentFlag.AlignLeft
-                )
-
-                if column == 0:
-                    table_item.setData(
-                        Qt.ItemDataRole.UserRole,
-                        item.get("id"),
-                    )
-
-                self.queue_table.setItem(
-                    row,
-                    column,
-                    table_item,
-                )
-
-        self.queue_table.resizeColumnsToContents()
-        self.status_label.setText(
-            f"Queue synchronized - {len(items)} item(s)."
-        )
+        self.queue_page.render_items(items)

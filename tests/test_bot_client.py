@@ -232,7 +232,8 @@ def test_add_queue_item():
         assert payload == {
             "url": "https://youtu.be/example",
             "title": None,
-            "channel": None,
+            "video_channel": None,
+            "twitch_channel": None,
             "submitted_by": "Steve",
             "submission_source": "manager",
         }

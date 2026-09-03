@@ -5,12 +5,14 @@ from app.window import ManagerWindow
 
 def test_update_presence_counts_updates_both_labels():
     window = SimpleNamespace(
-        player_count_label=SimpleNamespace(setText=lambda value: setattr(
-            window.player_count_label, "text", value
+        queue_page=SimpleNamespace(
+            player_count_label=SimpleNamespace(setText=lambda value: setattr(
+            window.queue_page.player_count_label, "text", value
         )),
-        manager_count_label=SimpleNamespace(setText=lambda value: setattr(
-            window.manager_count_label, "text", value
-        )),
+            manager_count_label=SimpleNamespace(setText=lambda value: setattr(
+                window.queue_page.manager_count_label, "text", value
+            )),
+        ),
     )
 
     ManagerWindow._update_presence_counts(
@@ -22,8 +24,8 @@ def test_update_presence_counts_updates_both_labels():
         },
     )
 
-    assert window.player_count_label.text == "Players Connected: 2"
-    assert window.manager_count_label.text == "Managers Connected: 3 (including this instance)"
+    assert window.queue_page.player_count_label.text == "Players Connected: 2"
+    assert window.queue_page.manager_count_label.text == "Managers Connected: 3 (including this instance)"
 
 
 def test_presence_event_updates_only_matching_count():
@@ -31,11 +33,13 @@ def test_presence_event_updates_only_matching_count():
     manager_updates = []
 
     window = SimpleNamespace(
-        player_count_label=SimpleNamespace(
+        queue_page=SimpleNamespace(
+            player_count_label=SimpleNamespace(
             setText=player_updates.append
         ),
-        manager_count_label=SimpleNamespace(
-            setText=manager_updates.append
+            manager_count_label=SimpleNamespace(
+                setText=manager_updates.append
+            ),
         ),
     )
 
@@ -56,11 +60,13 @@ def test_manager_presence_event_updates_only_manager_count():
     manager_updates = []
 
     window = SimpleNamespace(
-        player_count_label=SimpleNamespace(
+        queue_page=SimpleNamespace(
+            player_count_label=SimpleNamespace(
             setText=player_updates.append
         ),
-        manager_count_label=SimpleNamespace(
-            setText=manager_updates.append
+            manager_count_label=SimpleNamespace(
+                setText=manager_updates.append
+            ),
         ),
     )
 
@@ -92,7 +98,7 @@ def test_presence_signal_updates_player_count(qtbot, monkeypatch):
         }
     )
 
-    assert window.player_count_label.text() == "Players Connected: 4"
+    assert window.queue_page.player_count_label.text() == "Players Connected: 4"
 
 
 def test_connected_snapshot_hydrates_queue_without_http_refresh():

@@ -1,10 +1,19 @@
-﻿from urllib.parse import quote
+from urllib.parse import quote
 
 import httpx
 
 
 class BotClientError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        detail: str | None = None,
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.detail = detail
 
 
 class BotClient:
@@ -42,6 +51,26 @@ class BotClient:
                 )
                 response.raise_for_status()
                 return response.json()
+        except httpx.HTTPStatusError as exc:
+            detail = None
+
+            try:
+                body = exc.response.json()
+                if isinstance(body, dict):
+                    raw_detail = body.get("detail")
+                    if raw_detail is not None:
+                        detail = str(raw_detail)
+            except (ValueError, TypeError):
+                pass
+
+            message = detail or str(exc)
+
+            raise BotClientError(
+                message,
+                status_code=exc.response.status_code,
+                detail=detail,
+            ) from exc
+
         except httpx.HTTPError as exc:
             raise BotClientError(str(exc)) from exc
 
@@ -58,12 +87,23 @@ class BotClient:
 
         return result
 
+    def history(self) -> list[dict]:
+        result = self._request("GET", "/history")
+
+        if not isinstance(result, list):
+            raise BotClientError(
+                "Bot returned an invalid history response"
+            )
+
+        return result
+
     def add_queue_item(
         self,
         url: str,
         *,
         title: str | None = None,
-        channel: str | None = None,
+        video_channel: str | None = None,
+        twitch_channel: str | None = None,
         submitted_by: str | None = None,
     ) -> dict:
         return self._request(
@@ -72,7 +112,8 @@ class BotClient:
             json_body={
                 "url": url,
                 "title": title,
-                "channel": channel,
+                "video_channel": video_channel,
+                "twitch_channel": twitch_channel,
                 "submitted_by": submitted_by,
                 "submission_source": "manager",
             },
@@ -91,6 +132,12 @@ class BotClient:
             },
         )
 
+    def clear_queue(self) -> dict:
+        return self._request(
+            "DELETE",
+            "/queue",
+        )
+
     def remove_queue_item(
         self,
         item_id: int,
@@ -99,6 +146,125 @@ class BotClient:
             "DELETE",
             f"/queue/{item_id}",
         )
+
+    def refresh_queue_metadata(self) -> dict:
+        result = self._request(
+            "POST",
+            "/queue/refresh-metadata",
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid metadata refresh response"
+            )
+
+        return result
+
+    def bot_connection_setting(self) -> dict:
+        result = self._request(
+            "GET",
+            "/settings/bot-connection",
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid connection setting"
+            )
+
+        return result
+
+    def set_bot_connection(
+        self,
+        bot_url: str,
+        bot_port: int,
+    ) -> dict:
+        result = self._request(
+            "PUT",
+            "/settings/bot-connection",
+            json_body={
+                "bot_url": bot_url,
+                "bot_port": bot_port,
+            },
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid connection setting"
+            )
+
+        return result
+
+    def logging_setting(self) -> dict:
+        result = self._request(
+            "GET",
+            "/settings/logging",
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid logging setting"
+            )
+
+        return result
+
+    def set_logging_setting(
+        self,
+        enabled: bool,
+        timezone_name: str,
+    ) -> dict:
+        result = self._request(
+            "PUT",
+            "/settings/logging",
+            json_body={
+                "enabled": enabled,
+                "timezone": timezone_name,
+            },
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid logging setting"
+            )
+
+        return result
+
+    def public_web_setting(self) -> dict:
+        result = self._request(
+            "GET",
+            "/settings/public-web",
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid public web setting"
+            )
+
+        return result
+
+    def set_public_web_enabled(
+        self,
+        enabled: bool,
+        port: int | None = None,
+    ) -> dict:
+        json_body = {
+            "enabled": enabled,
+        }
+
+        if port is not None:
+            json_body["port"] = port
+
+        result = self._request(
+            "PUT",
+            "/settings/public-web",
+            json_body=json_body,
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid public web setting"
+            )
+
+        return result
 
     def player_status(self) -> dict:
         return self._request("GET", "/player/status")

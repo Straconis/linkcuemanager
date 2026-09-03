@@ -63,7 +63,7 @@ def test_update_client_restarts_listener_when_bot_url_changes(
         True,
     )
 
-    window.bot_url_input.setText(
+    window.bot_page.bot_url_input.setText(
         "https://linkcue.example.com"
     )
 
@@ -71,6 +71,6 @@ def test_update_client_restarts_listener_when_bot_url_changes(
 
     assert getattr(original_listener, "_test_stopped", False) is True
     assert len(created) == 1
-    assert created[0].base_url == "https://linkcue.example.com"
+    assert created[0].base_url == "https://linkcue.example.com:8000"
     assert created[0].started is True
     assert window.queue_event_listener is created[0]
