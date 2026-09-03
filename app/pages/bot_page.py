@@ -20,7 +20,7 @@ class BotPage(QWidget):
         bot_port: int,
         save_bot_url_callback: Callable[[], None],
         test_connection_callback: Callable[[], None],
-        toggle_public_web_callback: Callable[[], None],
+        save_public_web_callback: Callable[[], None],
         refresh_public_web_callback: Callable[[], None],
         save_logging_callback: Callable[[], None],
         refresh_logging_callback: Callable[[], None],
@@ -57,6 +57,16 @@ class BotPage(QWidget):
 
         group = QGroupBox("LinkCue Bot")
         group_layout = QVBoxLayout(group)
+
+        self.connection_group = QGroupBox(
+            "Bot Connection"
+        )
+        self.connection_group.setObjectName(
+            "botConnectionGroup"
+        )
+        connection_layout = QVBoxLayout(
+            self.connection_group
+        )
 
         connection_row = QHBoxLayout()
 
@@ -121,13 +131,15 @@ class BotPage(QWidget):
             self.bot_port_input
         )
 
-        group_layout.addLayout(connection_row)
+        connection_layout.addLayout(
+            connection_row
+        )
 
         connection_action_row = QHBoxLayout()
         connection_action_row.addStretch()
 
         self.save_bot_url_button = QPushButton(
-            "Save"
+            "Save Connection"
         )
         self.save_bot_url_button.setObjectName(
             "saveBotUrlButton"
@@ -163,7 +175,23 @@ class BotPage(QWidget):
             self.bot_status_label
         )
 
-        group_layout.addLayout(connection_action_row)
+        connection_layout.addLayout(
+            connection_action_row
+        )
+
+        group_layout.addWidget(
+            self.connection_group
+        )
+
+        self.public_web_group = QGroupBox(
+            "Public Web"
+        )
+        self.public_web_group.setObjectName(
+            "publicWebGroup"
+        )
+        public_web_layout = QVBoxLayout(
+            self.public_web_group
+        )
 
         web_row = QHBoxLayout()
         web_row.addWidget(QLabel("Public Web:"))
@@ -173,9 +201,6 @@ class BotPage(QWidget):
             "publicWebToggle"
         )
         self.public_web_toggle.setCheckable(True)
-        self.public_web_toggle.clicked.connect(
-            toggle_public_web_callback
-        )
         web_row.addWidget(
             self.public_web_toggle
         )
@@ -191,7 +216,9 @@ class BotPage(QWidget):
             1,
         )
 
-        group_layout.addLayout(web_row)
+        public_web_layout.addLayout(
+            web_row
+        )
 
         web_config_row = QHBoxLayout()
         web_config_row.addWidget(QLabel("Protocol:"))
@@ -251,6 +278,19 @@ class BotPage(QWidget):
             self.public_web_port_input
         )
 
+        self.save_public_web_button = QPushButton(
+            "Save Public Web"
+        )
+        self.save_public_web_button.setObjectName(
+            "savePublicWebButton"
+        )
+        self.save_public_web_button.clicked.connect(
+            save_public_web_callback
+        )
+        web_config_row.addWidget(
+            self.save_public_web_button
+        )
+
         self.refresh_public_web_button = QPushButton(
             "Refresh"
         )
@@ -264,7 +304,9 @@ class BotPage(QWidget):
             self.refresh_public_web_button
         )
 
-        group_layout.addLayout(web_config_row)
+        public_web_layout.addLayout(
+            web_config_row
+        )
 
         self.public_web_links_group = QGroupBox(
             "Public Web Links"
@@ -301,13 +343,22 @@ class BotPage(QWidget):
         )
 
         self.public_web_links_group.setVisible(False)
-        group_layout.addWidget(
+        public_web_layout.addWidget(
             self.public_web_links_group
         )
 
-        logging_group = QGroupBox("Logging")
+        group_layout.addWidget(
+            self.public_web_group
+        )
+
+        self.logging_group = QGroupBox(
+            "Logging"
+        )
+        self.logging_group.setObjectName(
+            "loggingGroup"
+        )
         logging_layout = QVBoxLayout(
-            logging_group
+            self.logging_group
         )
 
         logging_row = QHBoxLayout()
@@ -400,14 +451,17 @@ class BotPage(QWidget):
         )
 
         group_layout.addWidget(
-            logging_group
+            self.logging_group
         )
 
-        maintenance_group = QGroupBox(
+        self.maintenance_group = QGroupBox(
             "Maintenance"
         )
+        self.maintenance_group.setObjectName(
+            "maintenanceGroup"
+        )
         maintenance_layout = QHBoxLayout(
-            maintenance_group
+            self.maintenance_group
         )
 
         self.restart_bot_button = QPushButton(
@@ -423,20 +477,10 @@ class BotPage(QWidget):
             self.restart_bot_button
         )
 
-        self.restart_bot_note = QLabel(
-            "Restart control is currently a "
-            "development placeholder."
-        )
-        self.restart_bot_note.setObjectName(
-            "restartBotNote"
-        )
-        maintenance_layout.addWidget(
-            self.restart_bot_note,
-            1,
-        )
+        maintenance_layout.addStretch()
 
         group_layout.addWidget(
-            maintenance_group
+            self.maintenance_group
         )
 
         self.connection_mode_input.currentIndexChanged.connect(

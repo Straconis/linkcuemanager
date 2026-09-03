@@ -188,7 +188,7 @@ class ManagerWindow(QMainWindow):
             bot_port,
             self.save_bot_url,
             self.test_connection,
-            self.toggle_public_web,
+            self.save_public_web_setting,
             self.refresh_public_web_setting,
             self.save_logging_setting,
             self.refresh_logging_setting,
@@ -520,14 +520,20 @@ class ManagerWindow(QMainWindow):
                 }
 
                 QPushButton#addQueueButton,
-                QPushButton#addNextButton {
+                QPushButton#addNextButton,
+                QPushButton#saveBotUrlButton,
+                QPushButton#savePublicWebButton,
+                QPushButton#saveLoggingButton {
                     background-color: #3568ad;
                     border-color: #4d82cc;
                     color: #ffffff;
                 }
 
                 QPushButton#addQueueButton:hover,
-                QPushButton#addNextButton:hover {
+                QPushButton#addNextButton:hover,
+                QPushButton#saveBotUrlButton:hover,
+                QPushButton#savePublicWebButton:hover,
+                QPushButton#saveLoggingButton:hover {
                     background-color: #4078c3;
                     border-color: #6b9ee1;
                 }
@@ -815,20 +821,29 @@ class ManagerWindow(QMainWindow):
                 /* Primary actions */
 
                 QPushButton#addQueueButton,
-                QPushButton#addNextButton {
+                QPushButton#addNextButton,
+                QPushButton#saveBotUrlButton,
+                QPushButton#savePublicWebButton,
+                QPushButton#saveLoggingButton {
                     background-color: #3568ad;
                     border-color: #4d82cc;
                     color: #ffffff;
                 }
 
                 QPushButton#addQueueButton:hover,
-                QPushButton#addNextButton:hover {
+                QPushButton#addNextButton:hover,
+                QPushButton#saveBotUrlButton:hover,
+                QPushButton#savePublicWebButton:hover,
+                QPushButton#saveLoggingButton:hover {
                     background-color: #4078c3;
                     border-color: #6093dc;
                 }
 
                 QPushButton#addQueueButton:pressed,
-                QPushButton#addNextButton:pressed {
+                QPushButton#addNextButton:pressed,
+                QPushButton#saveBotUrlButton:pressed,
+                QPushButton#savePublicWebButton:pressed,
+                QPushButton#saveLoggingButton:pressed {
                     background-color: #2d5d9e;
                 }
 
@@ -1006,13 +1021,6 @@ class ManagerWindow(QMainWindow):
                 f"{scheme}://{hostname}"
             )
 
-        public_web_port = (
-            self.bot_page.public_web_port()
-        )
-        public_web_enabled = (
-            self.bot_page.requested_public_web_enabled()
-        )
-
         shared_settings = load_shared_settings()
         shared_settings["bot_url"] = bot_host
         shared_settings["bot_port"] = bot_port
@@ -1029,55 +1037,18 @@ class ManagerWindow(QMainWindow):
                 bot_host,
                 bot_port,
             )
-
-            public_web_result = (
-                self.bot_client.set_public_web_enabled(
-                    public_web_enabled,
-                    public_web_port,
-                    self.bot_page.public_web_host(),
-                    self.bot_page.public_web_mode(),
-                )
-            )
-
-            logging_result = (
-                self.bot_client.set_logging_setting(
-                    self.bot_page.requested_logging_enabled(),
-                    self.bot_page.logging_timezone(),
-                )
-            )
         except BotClientError as exc:
             self._show_error(exc)
             return
-
-        self._apply_public_web_setting(
-            bool(
-                public_web_result.get(
-                    "enabled"
-                )
-            ),
-            public_web_result.get("port"),
-            public_web_result.get("public_url"),
-            public_web_result.get("connection_mode"),
-        )
-
-        self._apply_logging_setting(
-            bool(logging_result.get("enabled")),
-            str(
-                logging_result.get(
-                    "timezone",
-                    "America/Detroit",
-                )
-            ),
-        )
 
         restart_required = bool(
             result.get("restart_required")
         )
 
         self.status_label.setText(
-            "Bot settings saved. Bot restart required."
+            "Bot connection saved. Bot restart required."
             if restart_required
-            else "Bot settings saved."
+            else "Bot connection saved."
         )
 
         if restart_required:
@@ -1085,7 +1056,8 @@ class ManagerWindow(QMainWindow):
                 self,
                 "Bot Restart Required",
                 (
-                    "The Bot settings were saved successfully.\n\n"
+                    "The Bot connection settings were saved "
+                    "successfully.\n\n"
                     "One or more changed settings require the Bot "
                     "to restart before they take effect.\n\n"
                     "Restart the Bot from Maintenance when you're ready."
@@ -1143,14 +1115,12 @@ class ManagerWindow(QMainWindow):
             "Public web setting refreshed."
         )
 
-    def toggle_public_web(self) -> None:
+    def save_public_web_setting(self) -> None:
         self._update_client()
-
-        requested = self.bot_page.requested_public_web_enabled()
 
         try:
             result = self.bot_client.set_public_web_enabled(
-                requested,
+                self.bot_page.requested_public_web_enabled(),
                 self.bot_page.public_web_port(),
                 self.bot_page.public_web_host(),
                 self.bot_page.public_web_mode(),
@@ -1160,18 +1130,15 @@ class ManagerWindow(QMainWindow):
             self._show_error(exc)
             return
 
-        enabled = bool(result.get("enabled"))
         self._apply_public_web_setting(
-            enabled,
+            bool(result.get("enabled")),
             result.get("port"),
             result.get("public_url"),
             result.get("connection_mode"),
         )
 
         self.status_label.setText(
-            "Public web enabled."
-            if enabled
-            else "Public web disabled."
+            "Public web settings saved."
         )
 
     def _apply_logging_setting(

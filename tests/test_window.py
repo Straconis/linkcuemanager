@@ -863,101 +863,7 @@ def test_refresh_public_web_setting_applies_bot_configuration(
     assert window.bot_page.requested_public_web_enabled() is True
 
 
-def test_save_bot_url_sends_public_web_configuration_to_bot(
-    qtbot,
-    monkeypatch,
-):
-    settings = {
-        "bot_url": "http://127.0.0.1",
-        "bot_port": 8000,
-        "bot_connection_mode": "automatic",
-    }
-    saved = {}
-    calls = []
-
-    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
-    monkeypatch.delenv("LINKCUE_BOT_PORT", raising=False)
-
-    monkeypatch.setattr(
-        "app.window.load_shared_settings",
-        lambda: dict(settings),
-    )
-    monkeypatch.setattr(
-        "app.window.save_shared_settings",
-        lambda value: saved.update(value),
-    )
-
-    window = ManagerWindow()
-    qtbot.addWidget(window)
-
-    class FakeBotClient:
-        def set_bot_connection(self, host, port):
-            return {"restart_required": False}
-
-        def set_public_web_enabled(
-            self,
-            enabled,
-            port,
-            public_url=None,
-            connection_mode=None,
-        ):
-            calls.append(
-                (
-                    enabled,
-                    port,
-                    public_url,
-                    connection_mode,
-                )
-            )
-            return {
-                "enabled": enabled,
-                "public_url": public_url,
-                "connection_mode": connection_mode,
-                "port": port,
-            }
-
-
-        def set_logging_setting(self, enabled, timezone):
-            return {
-                "enabled": enabled,
-                "timezone": timezone,
-            }
-    window.bot_client = FakeBotClient()
-
-    monkeypatch.setattr(
-        window,
-        "_update_client",
-        lambda: None,
-    )
-
-    window.bot_page.public_web_protocol_input.setCurrentText(
-        "https://"
-    )
-    window.bot_page.public_web_url_input.setText(
-        "linkcue.apps.bot-hosting.cloud"
-    )
-    window.bot_page.public_web_mode_input.setCurrentText(
-        "Automatic"
-    )
-    window.bot_page.public_web_port_input.setText("9000")
-
-    window.save_bot_url()
-
-    assert calls == [
-        (
-            window.bot_page.requested_public_web_enabled(),
-            9000,
-            "https://linkcue.apps.bot-hosting.cloud",
-            "automatic",
-        )
-    ]
-
-    assert "public_web_url" not in saved
-    assert "public_web_connection_mode" not in saved
-
-
-
-def test_save_bot_settings_sends_logging_configuration_to_bot(
+def test_save_bot_url_does_not_save_public_web(
     qtbot,
     monkeypatch,
 ):
@@ -980,7 +886,54 @@ def test_save_bot_settings_sends_logging_configuration_to_bot(
     window = ManagerWindow()
     qtbot.addWidget(window)
 
-    logging_calls = []
+    class FakeBotClient:
+        def set_bot_connection(self, host, port):
+            return {"restart_required": False}
+
+        def set_public_web_enabled(self, *args, **kwargs):
+            raise AssertionError(
+                "Save Connection must not save Public Web settings"
+            )
+
+        def set_logging_setting(self, *args, **kwargs):
+            return {
+                "enabled": True,
+                "timezone": "America/Detroit",
+            }
+
+    window.bot_client = FakeBotClient()
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+
+    window.save_bot_url()
+
+
+def test_save_bot_url_does_not_save_logging(
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
+    monkeypatch.delenv("LINKCUE_BOT_PORT", raising=False)
+
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: {
+            "bot_url": "http://127.0.0.1",
+            "bot_port": 8000,
+            "bot_connection_mode": "automatic",
+        },
+    )
+    monkeypatch.setattr(
+        "app.window.save_shared_settings",
+        lambda value: None,
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
 
     class FakeBotClient:
         def set_bot_connection(self, host, port):
@@ -1000,12 +953,10 @@ def test_save_bot_settings_sends_logging_configuration_to_bot(
                 "connection_mode": connection_mode,
             }
 
-        def set_logging_setting(self, enabled, timezone):
-            logging_calls.append((enabled, timezone))
-            return {
-                "enabled": enabled,
-                "timezone": timezone,
-            }
+        def set_logging_setting(self, *args, **kwargs):
+            raise AssertionError(
+                "Save Connection must not save Logging settings"
+            )
 
     window.bot_client = FakeBotClient()
 
@@ -1015,20 +966,81 @@ def test_save_bot_settings_sends_logging_configuration_to_bot(
         lambda: None,
     )
 
-    window.bot_page.logging_timezone_input.setCurrentText(
-        "America/Detroit"
-    )
-
-    expected_enabled = (
-        window.bot_page.requested_logging_enabled()
-    )
-
     window.save_bot_url()
 
-    assert logging_calls == [
-        (expected_enabled, "America/Detroit")
-    ]
 
+def test_save_public_web_setting_sends_only_public_web_configuration(
+    qtbot,
+    monkeypatch,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    calls = []
+
+    class FakeBotClient:
+        def set_public_web_enabled(
+            self,
+            enabled,
+            port,
+            public_url=None,
+            connection_mode=None,
+        ):
+            calls.append(
+                (
+                    enabled,
+                    port,
+                    public_url,
+                    connection_mode,
+                )
+            )
+            return {
+                "enabled": enabled,
+                "port": port,
+                "public_url": public_url,
+                "connection_mode": connection_mode,
+            }
+
+        def set_bot_connection(self, *args, **kwargs):
+            raise AssertionError(
+                "Save Public Web must not save Bot Connection settings"
+            )
+
+        def set_logging_setting(self, *args, **kwargs):
+            raise AssertionError(
+                "Save Public Web must not save Logging settings"
+            )
+
+    window.bot_client = FakeBotClient()
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+
+    window.bot_page.public_web_toggle.setChecked(True)
+    window.bot_page.public_web_protocol_input.setCurrentText(
+        "https://"
+    )
+    window.bot_page.public_web_url_input.setText(
+        "linkcue.apps.bot-hosting.cloud"
+    )
+    window.bot_page.public_web_mode_input.setCurrentText(
+        "Automatic"
+    )
+    window.bot_page.public_web_port_input.setText("9000")
+
+    window.save_public_web_setting()
+
+    assert calls == [
+        (
+            True,
+            9000,
+            "https://linkcue.apps.bot-hosting.cloud",
+            "automatic",
+        )
+    ]
 
 
 def test_save_bot_settings_shows_restart_required_popup(

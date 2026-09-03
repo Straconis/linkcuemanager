@@ -250,3 +250,56 @@ def test_bot_connection_url_does_not_seed_public_web_url(qtbot):
 
     assert page.bot_url_input.text() == "de1.bot-hosting.cloud"
     assert page.public_web_url_input.text() == ""
+
+
+def test_bot_tab_has_scoped_settings_groups(qtbot):
+    page = _build_page(qtbot)
+
+    assert page.connection_group.title() == "Bot Connection"
+    assert page.public_web_group.title() == "Public Web"
+    assert page.logging_group.title() == "Logging"
+    assert page.maintenance_group.title() == "Maintenance"
+
+    assert (
+        page.connection_group.objectName()
+        == "botConnectionGroup"
+    )
+    assert (
+        page.public_web_group.objectName()
+        == "publicWebGroup"
+    )
+    assert (
+        page.logging_group.objectName()
+        == "loggingGroup"
+    )
+    assert (
+        page.maintenance_group.objectName()
+        == "maintenanceGroup"
+    )
+
+
+def test_bot_tab_save_buttons_name_their_scope(qtbot):
+    page = _build_page(qtbot)
+
+    assert (
+        page.save_bot_url_button.text()
+        == "Save Connection"
+    )
+    assert (
+        page.save_public_web_button.text()
+        == "Save Public Web"
+    )
+    assert (
+        page.save_logging_button.text()
+        == "Save Logging"
+    )
+
+
+def test_bot_tab_has_no_restart_placeholder_note(qtbot):
+    page = _build_page(qtbot)
+
+    assert not hasattr(
+        page,
+        "restart_bot_note",
+    )
+
