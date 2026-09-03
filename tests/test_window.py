@@ -1,6 +1,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableWidgetItem
 
+from app.bot_client import BotClientError
 from app.config import APP_NAME, APP_VERSION, DEFAULT_BOT_URL
 from app.window import ManagerWindow
 
@@ -26,7 +27,9 @@ def test_window_identity(qtbot, monkeypatch):
     assert window.windowTitle() == (
         f"{APP_NAME} {APP_VERSION}"
     )
-    assert window.bot_page.bot_url_input.text() == "http://127.0.0.1"
+    assert window.bot_page.bot_protocol_input.currentText() == "http://"
+    assert window.bot_page.bot_url_input.text() == "127.0.0.1"
+    assert window.bot_page.bot_url() == "http://127.0.0.1"
     assert window.bot_page.bot_port_input.text() == "8000"
 
 
@@ -553,3 +556,731 @@ def test_window_schedules_initial_player_refresh(qtbot, monkeypatch):
         scheduled[2][1].__func__
         is ManagerWindow.refresh_public_web_setting
     )
+
+
+def test_window_defaults_to_automatic_connection_mode(qtbot, monkeypatch):
+    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    assert window.bot_page.connection_mode() == "automatic"
+    assert window.bot_page.bot_url() == "http://127.0.0.1"
+
+
+def test_update_client_automatic_mode_uses_portless_url(
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.window.QueueEventListener.start",
+        lambda self: None,
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    window.bot_page.bot_protocol_input.setCurrentText("https://")
+    window.bot_page.bot_url_input.setText(
+        "linkcue.apps.bot-hosting.cloud"
+    )
+    window.bot_page.bot_port_input.setText("8000")
+
+    window._update_client()
+
+    assert (
+        window.bot_client.base_url
+        == "https://linkcue.apps.bot-hosting.cloud"
+    )
+
+def test_window_automatic_mode_uses_portless_client(
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
+    monkeypatch.delenv("LINKCUE_BOT_PORT", raising=False)
+
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: {
+            "bot_url": "https://linkcue.apps.bot-hosting.cloud",
+            "bot_port": 8000,
+            "bot_connection_mode": "automatic",
+        },
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    assert window.bot_page.connection_mode() == "automatic"
+    assert (
+        window.bot_client.base_url
+        == "https://linkcue.apps.bot-hosting.cloud"
+    )
+
+
+def test_window_manual_mode_uses_configured_port(
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
+    monkeypatch.delenv("LINKCUE_BOT_PORT", raising=False)
+
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: {
+            "bot_url": "http://127.0.0.1",
+            "bot_port": 9123,
+            "bot_connection_mode": "manual",
+        },
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    assert window.bot_page.connection_mode() == "manual"
+    assert window.bot_client.base_url == "http://127.0.0.1:9123"
+
+def test_save_bot_url_persists_connection_mode(
+    qtbot,
+    monkeypatch,
+):
+    settings = {
+        "bot_url": "http://127.0.0.1",
+        "bot_port": 8000,
+        "bot_connection_mode": "automatic",
+    }
+    saved = {}
+
+    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
+    monkeypatch.delenv("LINKCUE_BOT_PORT", raising=False)
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: dict(settings),
+    )
+    monkeypatch.setattr(
+        "app.window.save_shared_settings",
+        lambda value: saved.update(value),
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    class FakeBotClient:
+        def set_bot_connection(self, host, port):
+            return {"restart_required": False}
+
+        def set_public_web_enabled(
+            self,
+            enabled,
+            port,
+            public_url=None,
+            connection_mode=None,
+        ):
+            return {
+                "enabled": enabled,
+                "port": port,
+                "public_url": public_url,
+                "connection_mode": connection_mode,
+            }
+
+
+        def set_logging_setting(self, enabled, timezone):
+            return {
+                "enabled": enabled,
+                "timezone": timezone,
+            }
+    window.bot_client = FakeBotClient()
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+
+    window.bot_page.connection_mode_input.setCurrentIndex(1)
+    assert window.bot_page.connection_mode() == "manual"
+
+    window.save_bot_url()
+
+    assert saved["bot_connection_mode"] == "manual"
+
+def test_save_bot_url_updates_client_before_remote_save(
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
+    monkeypatch.delenv("LINKCUE_BOT_PORT", raising=False)
+
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: {
+            "bot_url": "http://127.0.0.1",
+            "bot_port": 8000,
+            "bot_connection_mode": "automatic",
+        },
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    window.bot_page.bot_protocol_input.setCurrentText("https://")
+    window.bot_page.bot_url_input.setText(
+        "linkcue.apps.bot-hosting.cloud"
+    )
+
+    assert window.bot_client.base_url == "http://127.0.0.1"
+
+    window._update_client()
+
+    assert (
+        window.bot_client.base_url
+        == "https://linkcue.apps.bot-hosting.cloud"
+    )
+
+def test_save_bot_url_uses_current_ui_connection(
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
+    monkeypatch.delenv("LINKCUE_BOT_PORT", raising=False)
+
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: {
+            "bot_url": "http://127.0.0.1",
+            "bot_port": 8000,
+            "bot_connection_mode": "automatic",
+        },
+    )
+    monkeypatch.setattr(
+        "app.window.save_shared_settings",
+        lambda value: None,
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    calls = []
+
+    class FakeBotClient:
+        base_url = "https://linkcue.apps.bot-hosting.cloud"
+
+        def set_bot_connection(self, host, port):
+            calls.append(("bot", self.base_url, host, port))
+            return {"restart_required": False}
+
+        def set_public_web_enabled(
+            self,
+            enabled,
+            port,
+            public_url=None,
+            connection_mode=None,
+        ):
+            return {
+                "enabled": enabled,
+                "port": port,
+                "public_url": public_url,
+                "connection_mode": connection_mode,
+            }
+
+
+        def set_logging_setting(self, enabled, timezone):
+            return {
+                "enabled": enabled,
+                "timezone": timezone,
+            }
+    def fake_update_client():
+        window.bot_client = FakeBotClient()
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        fake_update_client,
+    )
+
+    window.bot_page.bot_protocol_input.setCurrentText("https://")
+    window.bot_page.bot_url_input.setText(
+        "linkcue.apps.bot-hosting.cloud"
+    )
+
+    window.save_bot_url()
+
+    assert calls
+    assert (
+        calls[0][1]
+        == "https://linkcue.apps.bot-hosting.cloud"
+    )
+
+
+
+
+def test_refresh_public_web_setting_applies_bot_configuration(
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
+    monkeypatch.delenv("LINKCUE_BOT_PORT", raising=False)
+
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: {
+            "bot_url": "http://de1.bot-hosting.cloud",
+            "bot_port": 25479,
+            "bot_connection_mode": "manual",
+        },
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    class FakeBotClient:
+        def public_web_setting(self):
+            return {
+                "enabled": True,
+                "public_url": (
+                    "https://linkcue.apps.bot-hosting.cloud"
+                ),
+                "connection_mode": "automatic",
+                "port": 9000,
+            }
+
+    window.bot_client = FakeBotClient()
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+
+    window.refresh_public_web_setting()
+
+    assert (
+        window.bot_page.public_web_host()
+        == "https://linkcue.apps.bot-hosting.cloud"
+    )
+    assert window.bot_page.public_web_mode() == "automatic"
+    assert window.bot_page.public_web_port() == 9000
+    assert window.bot_page.requested_public_web_enabled() is True
+
+
+def test_save_bot_url_sends_public_web_configuration_to_bot(
+    qtbot,
+    monkeypatch,
+):
+    settings = {
+        "bot_url": "http://127.0.0.1",
+        "bot_port": 8000,
+        "bot_connection_mode": "automatic",
+    }
+    saved = {}
+    calls = []
+
+    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
+    monkeypatch.delenv("LINKCUE_BOT_PORT", raising=False)
+
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: dict(settings),
+    )
+    monkeypatch.setattr(
+        "app.window.save_shared_settings",
+        lambda value: saved.update(value),
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    class FakeBotClient:
+        def set_bot_connection(self, host, port):
+            return {"restart_required": False}
+
+        def set_public_web_enabled(
+            self,
+            enabled,
+            port,
+            public_url=None,
+            connection_mode=None,
+        ):
+            calls.append(
+                (
+                    enabled,
+                    port,
+                    public_url,
+                    connection_mode,
+                )
+            )
+            return {
+                "enabled": enabled,
+                "public_url": public_url,
+                "connection_mode": connection_mode,
+                "port": port,
+            }
+
+
+        def set_logging_setting(self, enabled, timezone):
+            return {
+                "enabled": enabled,
+                "timezone": timezone,
+            }
+    window.bot_client = FakeBotClient()
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+
+    window.bot_page.public_web_protocol_input.setCurrentText(
+        "https://"
+    )
+    window.bot_page.public_web_url_input.setText(
+        "linkcue.apps.bot-hosting.cloud"
+    )
+    window.bot_page.public_web_mode_input.setCurrentText(
+        "Automatic"
+    )
+    window.bot_page.public_web_port_input.setText("9000")
+
+    window.save_bot_url()
+
+    assert calls == [
+        (
+            window.bot_page.requested_public_web_enabled(),
+            9000,
+            "https://linkcue.apps.bot-hosting.cloud",
+            "automatic",
+        )
+    ]
+
+    assert "public_web_url" not in saved
+    assert "public_web_connection_mode" not in saved
+
+
+
+def test_save_bot_settings_sends_logging_configuration_to_bot(
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
+    monkeypatch.delenv("LINKCUE_BOT_PORT", raising=False)
+
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: {
+            "bot_url": "http://127.0.0.1",
+            "bot_port": 8000,
+            "bot_connection_mode": "automatic",
+        },
+    )
+    monkeypatch.setattr(
+        "app.window.save_shared_settings",
+        lambda value: None,
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    logging_calls = []
+
+    class FakeBotClient:
+        def set_bot_connection(self, host, port):
+            return {"restart_required": False}
+
+        def set_public_web_enabled(
+            self,
+            enabled,
+            port,
+            public_url=None,
+            connection_mode=None,
+        ):
+            return {
+                "enabled": enabled,
+                "port": port,
+                "public_url": public_url,
+                "connection_mode": connection_mode,
+            }
+
+        def set_logging_setting(self, enabled, timezone):
+            logging_calls.append((enabled, timezone))
+            return {
+                "enabled": enabled,
+                "timezone": timezone,
+            }
+
+    window.bot_client = FakeBotClient()
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+
+    window.bot_page.logging_timezone_input.setCurrentText(
+        "America/Detroit"
+    )
+
+    expected_enabled = (
+        window.bot_page.requested_logging_enabled()
+    )
+
+    window.save_bot_url()
+
+    assert logging_calls == [
+        (expected_enabled, "America/Detroit")
+    ]
+
+
+
+def test_save_bot_settings_shows_restart_required_popup(
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
+    monkeypatch.delenv("LINKCUE_BOT_PORT", raising=False)
+
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: {
+            "bot_url": "http://127.0.0.1",
+            "bot_port": 8000,
+            "bot_connection_mode": "automatic",
+        },
+    )
+    monkeypatch.setattr(
+        "app.window.save_shared_settings",
+        lambda value: None,
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    class FakeBotClient:
+        def set_bot_connection(self, host, port):
+            return {"restart_required": True}
+
+        def set_public_web_enabled(
+            self,
+            enabled,
+            port,
+            public_url=None,
+            connection_mode=None,
+        ):
+            return {
+                "enabled": enabled,
+                "port": port,
+                "public_url": public_url,
+                "connection_mode": connection_mode,
+            }
+
+        def set_logging_setting(self, enabled, timezone):
+            return {
+                "enabled": enabled,
+                "timezone": timezone,
+            }
+
+    window.bot_client = FakeBotClient()
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+
+    popup_calls = []
+
+    monkeypatch.setattr(
+        "app.window.QMessageBox.warning",
+        lambda *args: popup_calls.append(args),
+    )
+
+    window.save_bot_url()
+
+    assert len(popup_calls) == 1
+    assert "restart" in str(popup_calls[0]).lower()
+
+
+
+def test_save_bot_settings_does_not_show_restart_popup_when_not_required(
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
+    monkeypatch.delenv("LINKCUE_BOT_PORT", raising=False)
+
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: {
+            "bot_url": "http://127.0.0.1",
+            "bot_port": 8000,
+            "bot_connection_mode": "automatic",
+        },
+    )
+    monkeypatch.setattr(
+        "app.window.save_shared_settings",
+        lambda value: None,
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    class FakeBotClient:
+        def set_bot_connection(self, host, port):
+            return {"restart_required": False}
+
+        def set_public_web_enabled(
+            self,
+            enabled,
+            port,
+            public_url=None,
+            connection_mode=None,
+        ):
+            return {
+                "enabled": enabled,
+                "port": port,
+                "public_url": public_url,
+                "connection_mode": connection_mode,
+            }
+
+        def set_logging_setting(self, enabled, timezone):
+            return {
+                "enabled": enabled,
+                "timezone": timezone,
+            }
+
+    window.bot_client = FakeBotClient()
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+
+    popup_calls = []
+
+    monkeypatch.setattr(
+        "app.window.QMessageBox.warning",
+        lambda *args: popup_calls.append(args),
+    )
+
+    window.save_bot_url()
+
+    assert popup_calls == []
+
+
+
+def test_save_bot_settings_persists_local_connection_when_bot_is_unreachable(
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
+    monkeypatch.delenv("LINKCUE_BOT_PORT", raising=False)
+
+    saved = {}
+
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: {
+            "bot_url": "http://127.0.0.1",
+            "bot_port": 8000,
+            "bot_connection_mode": "automatic",
+        },
+    )
+    monkeypatch.setattr(
+        "app.window.save_shared_settings",
+        lambda value: saved.update(value),
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    window.bot_page.bot_protocol_input.setCurrentText("http://")
+    window.bot_page.bot_url_input.setText(
+        "de1.bot-hosting.cloud"
+    )
+    window.bot_page.bot_port_input.setText("25479")
+    window.bot_page.connection_mode_input.setCurrentText(
+        "Manual"
+    )
+
+    class FakeBotClient:
+        def set_bot_connection(self, host, port):
+            raise BotClientError("Bot unavailable")
+
+    window.bot_client = FakeBotClient()
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        window,
+        "_show_error",
+        lambda exc: None,
+    )
+
+    window.save_bot_url()
+
+    assert saved["bot_url"] == "http://de1.bot-hosting.cloud"
+    assert saved["bot_port"] == 25479
+    assert saved["bot_connection_mode"] == "manual"
+
+
+def test_restart_bot_cancel_does_not_request_restart(
+    qtbot,
+    monkeypatch,
+):
+    from PySide6.QtWidgets import QMessageBox
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    calls = []
+
+    class FakeClient:
+        def restart_bot(self):
+            calls.append(True)
+            return {"status": "restart_requested"}
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    monkeypatch.setattr(
+        "app.window.QMessageBox.question",
+        lambda *args, **kwargs:
+            QMessageBox.StandardButton.No,
+    )
+
+    window.restart_bot()
+
+    assert calls == []
+
+
+def test_restart_bot_confirm_requests_restart_once(
+    qtbot,
+    monkeypatch,
+):
+    from PySide6.QtWidgets import QMessageBox
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    calls = []
+
+    class FakeClient:
+        def restart_bot(self):
+            calls.append(True)
+            return {"status": "restart_requested"}
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    monkeypatch.setattr(
+        "app.window.QMessageBox.question",
+        lambda *args, **kwargs:
+            QMessageBox.StandardButton.Yes,
+    )
+
+    window.restart_bot()
+
+    assert calls == [True]

@@ -59,6 +59,9 @@ class BotClient:
 
                 headers = {}
 
+                if json_body is not None:
+                    headers["Content-Type"] = "application/json"
+
                 identity = self.identity_store.load_identity()
 
                 if identity:
@@ -102,6 +105,19 @@ class BotClient:
 
     def health(self) -> dict:
         return self._request("GET", "/health")
+
+    def restart_bot(self) -> dict:
+        result = self._request(
+            "POST",
+            "/maintenance/restart",
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid restart response"
+            )
+
+        return result
 
     def queue(self) -> list[dict]:
         result = self._request("GET", "/queue")
@@ -271,6 +287,8 @@ class BotClient:
         self,
         enabled: bool,
         port: int | None = None,
+        public_url: str | None = None,
+        connection_mode: str | None = None,
     ) -> dict:
         json_body = {
             "enabled": enabled,
@@ -278,6 +296,12 @@ class BotClient:
 
         if port is not None:
             json_body["port"] = port
+
+        if public_url is not None:
+            json_body["public_url"] = public_url
+
+        if connection_mode is not None:
+            json_body["connection_mode"] = connection_mode
 
         result = self._request(
             "PUT",

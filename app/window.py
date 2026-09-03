@@ -85,9 +85,23 @@ class ManagerWindow(QMainWindow):
         bot_port = int(configured_port or 8000)
         base_url = f"{scheme}://{hostname}"
 
-        self.bot_client = BotClient(
-            f"{base_url}:{bot_port}"
+        connection_mode = self.shared_settings.get(
+            "bot_connection_mode",
+            "automatic",
         )
+
+        if connection_mode not in {
+            "automatic",
+            "manual",
+        }:
+            connection_mode = "automatic"
+
+        if connection_mode == "automatic":
+            client_url = base_url
+        else:
+            client_url = f"{base_url}:{bot_port}"
+
+        self.bot_client = BotClient(client_url)
 
         root = QWidget()
         root.setObjectName("managerRoot")
@@ -179,6 +193,7 @@ class ManagerWindow(QMainWindow):
             self.save_logging_setting,
             self.refresh_logging_setting,
             self.restart_bot,
+            connection_mode=connection_mode,
         )
 
         self.twitch_page = TwitchPage(
@@ -998,6 +1013,17 @@ class ManagerWindow(QMainWindow):
             self.bot_page.requested_public_web_enabled()
         )
 
+        shared_settings = load_shared_settings()
+        shared_settings["bot_url"] = bot_host
+        shared_settings["bot_port"] = bot_port
+        shared_settings["bot_connection_mode"] = (
+            self.bot_page.connection_mode()
+        )
+        save_shared_settings(shared_settings)
+        self.shared_settings = shared_settings
+
+        self._update_client()
+
         try:
             result = self.bot_client.set_bot_connection(
                 bot_host,
@@ -1008,18 +1034,20 @@ class ManagerWindow(QMainWindow):
                 self.bot_client.set_public_web_enabled(
                     public_web_enabled,
                     public_web_port,
+                    self.bot_page.public_web_host(),
+                    self.bot_page.public_web_mode(),
+                )
+            )
+
+            logging_result = (
+                self.bot_client.set_logging_setting(
+                    self.bot_page.requested_logging_enabled(),
+                    self.bot_page.logging_timezone(),
                 )
             )
         except BotClientError as exc:
             self._show_error(exc)
             return
-
-        shared_settings = load_shared_settings()
-        shared_settings["bot_url"] = bot_host
-        shared_settings["bot_port"] = bot_port
-        save_shared_settings(shared_settings)
-
-        self.shared_settings = shared_settings
 
         self._apply_public_web_setting(
             bool(
@@ -1028,6 +1056,18 @@ class ManagerWindow(QMainWindow):
                 )
             ),
             public_web_result.get("port"),
+            public_web_result.get("public_url"),
+            public_web_result.get("connection_mode"),
+        )
+
+        self._apply_logging_setting(
+            bool(logging_result.get("enabled")),
+            str(
+                logging_result.get(
+                    "timezone",
+                    "America/Detroit",
+                )
+            ),
         )
 
         restart_required = bool(
@@ -1039,6 +1079,18 @@ class ManagerWindow(QMainWindow):
             if restart_required
             else "Bot settings saved."
         )
+
+        if restart_required:
+            QMessageBox.warning(
+                self,
+                "Bot Restart Required",
+                (
+                    "The Bot settings were saved successfully.\n\n"
+                    "One or more changed settings require the Bot "
+                    "to restart before they take effect.\n\n"
+                    "Restart the Bot from Maintenance when you're ready."
+                ),
+            )
 
     def test_connection(self) -> None:
         self._update_client()
@@ -1060,10 +1112,14 @@ class ManagerWindow(QMainWindow):
         self,
         enabled: bool,
         port: int | None = None,
+        public_url: str | None = None,
+        connection_mode: str | None = None,
     ) -> None:
         self.bot_page.apply_public_web_setting(
             enabled,
             port,
+            public_url,
+            connection_mode,
         )
 
     def refresh_public_web_setting(self) -> None:
@@ -1079,6 +1135,8 @@ class ManagerWindow(QMainWindow):
         self._apply_public_web_setting(
             bool(result.get("enabled")),
             result.get("port"),
+            result.get("public_url"),
+            result.get("connection_mode"),
         )
 
         self.status_label.setText(
@@ -1094,6 +1152,8 @@ class ManagerWindow(QMainWindow):
             result = self.bot_client.set_public_web_enabled(
                 requested,
                 self.bot_page.public_web_port(),
+                self.bot_page.public_web_host(),
+                self.bot_page.public_web_mode(),
             )
         except BotClientError as exc:
             self.refresh_public_web_setting()
@@ -1104,6 +1164,8 @@ class ManagerWindow(QMainWindow):
         self._apply_public_web_setting(
             enabled,
             result.get("port"),
+            result.get("public_url"),
+            result.get("connection_mode"),
         )
 
         self.status_label.setText(
@@ -1178,46 +1240,36 @@ class ManagerWindow(QMainWindow):
     def restart_bot(self) -> None:
         from PySide6.QtWidgets import QMessageBox
 
-        message_box = QMessageBox(self)
-        message_box.setWindowTitle("Restart Bot")
-        message_box.setIcon(QMessageBox.Icon.Information)
-        message_box.setText(
-            "Restart Bot control is not implemented yet.\n\n"
-            "This button is a development placeholder.\n"
-            "No restart will occur."
+        answer = QMessageBox.question(
+            self,
+            "Restart Bot",
+            (
+                "Restart the LinkCue Bot?\n\n"
+                "The Bot connection will be briefly unavailable "
+                "while it restarts."
+            ),
+            (
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No
+            ),
+            QMessageBox.StandardButton.No,
         )
-        message_box.setStandardButtons(
-            QMessageBox.StandardButton.Ok
+
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self._update_client()
+
+        try:
+            self.bot_client.restart_bot()
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self.status_label.setText(
+            "Bot restart requested. "
+            "Connection may be briefly unavailable."
         )
-        message_box.setStyleSheet(
-            """
-            QMessageBox {
-                background-color: #1e232b;
-            }
-
-            QMessageBox QLabel {
-                color: #d7dde8;
-            }
-
-            QMessageBox QPushButton {
-                background-color: #2b313b;
-                color: #f2f4f8;
-                border: 1px solid #48515f;
-                border-radius: 6px;
-                padding: 6px 14px;
-                min-width: 70px;
-            }
-
-            QMessageBox QPushButton:hover {
-                background-color: #343b46;
-            }
-
-            QMessageBox QPushButton:pressed {
-                background-color: #252b33;
-            }
-            """
-        )
-        message_box.exec()
 
     def refresh_player_status(self) -> None:
         self._update_client()

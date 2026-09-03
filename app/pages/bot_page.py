@@ -1,4 +1,5 @@
 ﻿from collections.abc import Callable
+from urllib.parse import urlsplit
 
 from PySide6.QtWidgets import (
     QComboBox,
@@ -24,9 +25,32 @@ class BotPage(QWidget):
         save_logging_callback: Callable[[], None],
         refresh_logging_callback: Callable[[], None],
         restart_bot_callback: Callable[[], None],
+        *,
+        connection_mode: str = "automatic",
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
+
+        self._connection_mode = (
+            connection_mode
+            if connection_mode in {"automatic", "manual"}
+            else "automatic"
+        )
+
+        parsed_base_url = urlsplit(
+            base_url
+            if "://" in base_url
+            else f"https://{base_url}"
+        )
+        initial_protocol = (
+            f"{parsed_base_url.scheme}://"
+            if parsed_base_url.scheme
+            else "https://"
+        )
+        initial_host = (
+            parsed_base_url.hostname
+            or base_url
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 12)
@@ -35,10 +59,54 @@ class BotPage(QWidget):
         group_layout = QVBoxLayout(group)
 
         connection_row = QHBoxLayout()
-        connection_row.addWidget(QLabel("Bot URL:"))
 
-        self.bot_url_input = QLineEdit(base_url)
+        connection_row.addWidget(QLabel("Mode:"))
+
+        self.connection_mode_input = QComboBox()
+        self.connection_mode_input.setObjectName(
+            "connectionModeInput"
+        )
+        self.connection_mode_input.addItem(
+            "Automatic",
+            "automatic",
+        )
+        self.connection_mode_input.addItem(
+            "Manual",
+            "manual",
+        )
+
+        mode_index = self.connection_mode_input.findData(
+            self._connection_mode
+        )
+        self.connection_mode_input.setCurrentIndex(
+            mode_index if mode_index >= 0 else 0
+        )
+
+        connection_row.addWidget(
+            self.connection_mode_input
+        )
+
+        connection_row.addWidget(QLabel("Protocol:"))
+
+        self.bot_protocol_input = QComboBox()
+        self.bot_protocol_input.setObjectName(
+            "botProtocolInput"
+        )
+        self.bot_protocol_input.addItems(
+            ["http://", "https://"]
+        )
+        self.bot_protocol_input.setCurrentText(
+            initial_protocol
+        )
+        connection_row.addWidget(
+            self.bot_protocol_input
+        )
+
+        connection_row.addWidget(QLabel("Host:"))
+
+        self.bot_url_input = QLineEdit(initial_host)
         self.bot_url_input.setObjectName("botUrlInput")
+        self.bot_url_input.setMinimumWidth(280)
         connection_row.addWidget(
             self.bot_url_input,
             1,
@@ -53,6 +121,11 @@ class BotPage(QWidget):
             self.bot_port_input
         )
 
+        group_layout.addLayout(connection_row)
+
+        connection_action_row = QHBoxLayout()
+        connection_action_row.addStretch()
+
         self.save_bot_url_button = QPushButton(
             "Save"
         )
@@ -62,7 +135,7 @@ class BotPage(QWidget):
         self.save_bot_url_button.clicked.connect(
             save_bot_url_callback
         )
-        connection_row.addWidget(
+        connection_action_row.addWidget(
             self.save_bot_url_button
         )
 
@@ -75,22 +148,22 @@ class BotPage(QWidget):
         self.test_connection_button.clicked.connect(
             test_connection_callback
         )
-        connection_row.addWidget(
+        connection_action_row.addWidget(
             self.test_connection_button
         )
 
-        connection_row.addWidget(QLabel("Status:"))
+        connection_action_row.addWidget(QLabel("Status:"))
 
         self.bot_status_label = QLabel("Not checked")
         self.bot_status_label.setObjectName(
             "botStatusLabel"
         )
         self.bot_status_label.setMinimumWidth(120)
-        connection_row.addWidget(
+        connection_action_row.addWidget(
             self.bot_status_label
         )
 
-        group_layout.addLayout(connection_row)
+        group_layout.addLayout(connection_action_row)
 
         web_row = QHBoxLayout()
         web_row.addWidget(QLabel("Public Web:"))
@@ -118,14 +191,63 @@ class BotPage(QWidget):
             1,
         )
 
-        web_row.addWidget(QLabel("Web Port:"))
+        group_layout.addLayout(web_row)
+
+        web_config_row = QHBoxLayout()
+        web_config_row.addWidget(QLabel("Protocol:"))
+
+        self.public_web_protocol_input = QComboBox()
+        self.public_web_protocol_input.setObjectName(
+            "publicWebProtocolInput"
+        )
+        self.public_web_protocol_input.addItems(
+            ["http://", "https://"]
+        )
+        self.public_web_protocol_input.setCurrentText(
+            "https://"
+        )
+        web_config_row.addWidget(
+            self.public_web_protocol_input
+        )
+
+        web_config_row.addWidget(QLabel("Host:"))
+
+        self.public_web_url_input = QLineEdit()
+        self.public_web_url_input.setObjectName(
+            "publicWebUrlInput"
+        )
+        self.public_web_url_input.setMinimumWidth(280)
+        web_config_row.addWidget(
+            self.public_web_url_input,
+            1,
+        )
+
+        web_config_row.addWidget(QLabel("Port Mode:"))
+
+        self.public_web_mode_input = QComboBox()
+        self.public_web_mode_input.setObjectName(
+            "publicWebModeInput"
+        )
+        self.public_web_mode_input.addItem(
+            "Automatic",
+            "automatic",
+        )
+        self.public_web_mode_input.addItem(
+            "Manual",
+            "manual",
+        )
+        web_config_row.addWidget(
+            self.public_web_mode_input
+        )
+
+        web_config_row.addWidget(QLabel("Web Port:"))
 
         self.public_web_port_input = QLineEdit()
         self.public_web_port_input.setObjectName(
             "publicWebPortInput"
         )
         self.public_web_port_input.setMaximumWidth(90)
-        web_row.addWidget(
+        web_config_row.addWidget(
             self.public_web_port_input
         )
 
@@ -138,11 +260,11 @@ class BotPage(QWidget):
         self.refresh_public_web_button.clicked.connect(
             refresh_public_web_callback
         )
-        web_row.addWidget(
+        web_config_row.addWidget(
             self.refresh_public_web_button
         )
 
-        group_layout.addLayout(web_row)
+        group_layout.addLayout(web_config_row)
 
         self.public_web_links_group = QGroupBox(
             "Public Web Links"
@@ -317,10 +439,22 @@ class BotPage(QWidget):
             maintenance_group
         )
 
-        self.bot_url_input.textChanged.connect(
+        self.connection_mode_input.currentIndexChanged.connect(
+            self._connection_mode_changed
+        )
+        self.bot_url_input.editingFinished.connect(
+            self.normalize_bot_url_input
+        )
+        self.public_web_url_input.textChanged.connect(
             self._refresh_public_web_links
         )
-        self.bot_port_input.textChanged.connect(
+        self.public_web_url_input.editingFinished.connect(
+            self.normalize_public_web_url_input
+        )
+        self.public_web_protocol_input.currentIndexChanged.connect(
+            self._refresh_public_web_links
+        )
+        self.public_web_mode_input.currentIndexChanged.connect(
             self._refresh_public_web_links
         )
         self.public_web_port_input.textChanged.connect(
@@ -333,7 +467,58 @@ class BotPage(QWidget):
         layout.addStretch()
 
     def bot_host(self) -> str:
-        return self.bot_url_input.text().strip().rstrip("/")
+        host = self.bot_url_input.text().strip().rstrip("/")
+
+        if not host:
+            return ""
+
+        return f"{self.bot_protocol_input.currentText()}{host}"
+
+    def normalize_bot_url_input(self) -> None:
+        value = self.bot_url_input.text().strip()
+
+        if "://" not in value:
+            return
+
+        parsed = urlsplit(value)
+
+        if parsed.scheme in {"http", "https"}:
+            self.bot_protocol_input.setCurrentText(
+                f"{parsed.scheme}://"
+            )
+
+        if parsed.hostname:
+            self.bot_url_input.setText(parsed.hostname)
+
+    def normalize_public_web_url_input(self) -> None:
+        value = self.public_web_url_input.text().strip()
+
+        if "://" not in value:
+            return
+
+        parsed = urlsplit(value)
+
+        if parsed.scheme in {"http", "https"}:
+            self.public_web_protocol_input.setCurrentText(
+                f"{parsed.scheme}://"
+            )
+
+        if parsed.hostname:
+            self.public_web_url_input.setText(
+                parsed.hostname
+            )
+
+    def connection_mode(self) -> str:
+        mode = self.connection_mode_input.currentData()
+
+        if mode in {"automatic", "manual"}:
+            return mode
+
+        return "automatic"
+
+    def _connection_mode_changed(self) -> None:
+        self._connection_mode = self.connection_mode()
+        self._refresh_public_web_links()
 
     def bot_port(self) -> int:
         value = self.bot_port_input.text().strip()
@@ -348,6 +533,9 @@ class BotPage(QWidget):
 
         if not host:
             return ""
+
+        if self.connection_mode() == "automatic":
+            return host
 
         return f"{host}:{self.bot_port()}"
 
@@ -365,6 +553,30 @@ class BotPage(QWidget):
     def requested_public_web_enabled(self) -> bool:
         return self.public_web_toggle.isChecked()
 
+    def public_web_mode(self) -> str:
+        mode = self.public_web_mode_input.currentData()
+
+        if mode in {"automatic", "manual"}:
+            return mode
+
+        return "automatic"
+
+    def public_web_host(self) -> str:
+        host = (
+            self.public_web_url_input
+            .text()
+            .strip()
+            .rstrip("/")
+        )
+
+        if not host:
+            return ""
+
+        return (
+            f"{self.public_web_protocol_input.currentText()}"
+            f"{host}"
+        )
+
     def public_web_port(self) -> int | None:
         value = self.public_web_port_input.text().strip()
 
@@ -377,16 +589,25 @@ class BotPage(QWidget):
             return None
 
     def _refresh_public_web_links(self) -> None:
-        host = self.bot_host()
+        host = self.public_web_host()
         port = self.public_web_port()
 
-        if not host or port is None:
+        if not host:
             self.live_queue_link.clear()
             self.help_link.clear()
             self.architecture_link.clear()
             return
 
-        base_url = f"{host}:{port}"
+        if self.public_web_mode() == "automatic":
+            base_url = host
+        else:
+            if port is None:
+                self.live_queue_link.clear()
+                self.help_link.clear()
+                self.architecture_link.clear()
+                return
+
+            base_url = f"{host}:{port}"
 
         live_url = f"{base_url}/live"
         help_url = f"{base_url}/help"
@@ -457,7 +678,27 @@ class BotPage(QWidget):
         self,
         enabled: bool,
         port: int | None = None,
+        public_url: str | None = None,
+        connection_mode: str | None = None,
     ) -> None:
+        if public_url:
+            parsed = urlsplit(public_url)
+
+            if parsed.scheme in {"http", "https"}:
+                self.public_web_protocol_input.setCurrentText(
+                    f"{parsed.scheme}://"
+                )
+
+            if parsed.hostname:
+                self.public_web_url_input.setText(
+                    parsed.hostname
+                )
+
+        if connection_mode in {"automatic", "manual"}:
+            self.public_web_mode_input.setCurrentText(
+                connection_mode.capitalize()
+            )
+
         self.public_web_toggle.blockSignals(True)
         self.public_web_toggle.setChecked(enabled)
         self.public_web_toggle.setText(

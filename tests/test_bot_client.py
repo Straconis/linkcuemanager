@@ -307,3 +307,71 @@ def test_remove_queue_item():
         "status": "deleted",
         "id": 42,
     }
+
+def test_json_request_sets_application_json_content_type():
+    import json
+
+    captured = {}
+
+    def handler(request):
+        captured["content_type"] = request.headers.get(
+            "Content-Type"
+        )
+        captured["body"] = request.content
+
+        return httpx.Response(
+            200,
+            json={
+                "bot_url": "http://de1.bot-hosting.cloud",
+                "bot_port": 25479,
+                "restart_required": True,
+            },
+        )
+
+    client = BotClient(
+        "http://example.test",
+        transport=httpx.MockTransport(handler),
+    )
+
+    client.identity_store.load_identity = lambda: None
+
+    client.set_bot_connection(
+        "http://de1.bot-hosting.cloud",
+        25479,
+    )
+
+    assert captured["content_type"] == "application/json"
+
+    assert json.loads(captured["body"]) == {
+        "bot_url": "http://de1.bot-hosting.cloud",
+        "bot_port": 25479,
+    }
+
+
+def test_restart_bot_posts_to_maintenance_restart():
+    captured = {}
+
+    def handler(request: httpx.Request):
+        captured["method"] = request.method
+        captured["path"] = request.url.path
+
+        return httpx.Response(
+            200,
+            json={"status": "restart_requested"},
+        )
+
+    client = BotClient(
+        "http://example.test",
+        transport=httpx.MockTransport(handler),
+    )
+    client.identity_store.load_identity = lambda: None
+
+    result = client.restart_bot()
+
+    assert captured == {
+        "method": "POST",
+        "path": "/maintenance/restart",
+    }
+    assert result == {
+        "status": "restart_requested"
+    }
