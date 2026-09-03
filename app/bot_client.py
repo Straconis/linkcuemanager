@@ -1,6 +1,10 @@
 from urllib.parse import quote
+import json
 
 import httpx
+
+from app.linkcue_identity import IdentityStore
+from app.request_signer import create_signed_headers
 
 
 class BotClientError(RuntimeError):
@@ -27,6 +31,7 @@ class BotClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.transport = transport
+        self.identity_store = IdentityStore()
 
     def _client(self) -> httpx.Client:
         return httpx.Client(
@@ -44,10 +49,31 @@ class BotClient:
     ) -> dict | list:
         try:
             with self._client() as client:
+                body = b""
+
+                if json_body is not None:
+                    body = json.dumps(
+                        json_body,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+
+                headers = {}
+
+                identity = self.identity_store.load_identity()
+
+                if identity:
+                    headers = create_signed_headers(
+                        identity,
+                        method=method,
+                        path=path,
+                        body=body,
+                    )
+
                 response = client.request(
                     method,
                     path,
-                    json=json_body,
+                    content=body if body else None,
+                    headers=headers,
                 )
                 response.raise_for_status()
                 return response.json()
