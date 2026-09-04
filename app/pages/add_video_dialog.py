@@ -48,6 +48,7 @@ class AddVideoDialog(QDialog):
         cancel_button.clicked.connect(self.reject)
 
         add_button = QPushButton("Add")
+        add_button.setObjectName("addVideoDialogAddButton")
         add_button.clicked.connect(self.accept)
         add_button.setDefault(True)
 

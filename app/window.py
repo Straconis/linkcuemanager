@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QInputDialog,
     QLineEdit,
     QListWidget,
     QMainWindow,
@@ -163,18 +164,24 @@ class ManagerWindow(QMainWindow):
         self.page_stack.setObjectName("pageStack")
 
         self.queue_page = QueuePage(
-            self.refresh_queue,
+            self.refresh_current_view,
             self.show_add_video_dialog,
             self.refresh_queue_metadata,
             self.export_queue_csv,
+            self.export_selected_queue_csv,
             self.export_history_csv,
             self.import_queue_csv,
             self.move_selected_to_beginning,
             self.move_selected_up,
             self.move_selected_down,
             self.move_selected_to_end,
+            self.move_selected_to_position,
             self.remove_selected,
             self.clear_queue,
+        )
+
+        self.queue_page.view_toggle_button.clicked.connect(
+            self.refresh_current_view
         )
 
         self.manager_page = ManagerPage(
@@ -360,6 +367,11 @@ class ManagerWindow(QMainWindow):
                     color: #f1f3f5;
                 }
 
+                QDialog {
+                    background-color: #111318;
+                    color: #f1f3f5;
+                }
+
                 /* -----------------------------------------------------
                    Navigation rail
                    ----------------------------------------------------- */
@@ -489,6 +501,19 @@ class ManagerWindow(QMainWindow):
                     color: #697386;
                 }
 
+                QComboBox {
+                    background-color: #101217;
+                    color: #f1f3f5;
+                    border: 1px solid #343c49;
+                    border-radius: 9px;
+                    padding: 8px 12px;
+                    min-height: 36px;
+                }
+
+                QComboBox:focus {
+                    border: 1px solid #4f8fe8;
+                }
+
                 /* -----------------------------------------------------
                    Buttons
                    ----------------------------------------------------- */
@@ -519,6 +544,8 @@ class ManagerWindow(QMainWindow):
                     border-color: #252a32;
                 }
 
+                QPushButton#addVideoDialogAddButton,
+                QPushButton#addVideoButton,
                 QPushButton#addQueueButton,
                 QPushButton#addNextButton,
                 QPushButton#saveBotUrlButton,
@@ -529,6 +556,8 @@ class ManagerWindow(QMainWindow):
                     color: #ffffff;
                 }
 
+                QPushButton#addVideoDialogAddButton:hover,
+                QPushButton#addVideoButton:hover,
                 QPushButton#addQueueButton:hover,
                 QPushButton#addNextButton:hover,
                 QPushButton#saveBotUrlButton:hover,
@@ -820,6 +849,8 @@ class ManagerWindow(QMainWindow):
 
                 /* Primary actions */
 
+                QPushButton#addVideoDialogAddButton,
+                QPushButton#addVideoButton,
                 QPushButton#addQueueButton,
                 QPushButton#addNextButton,
                 QPushButton#saveBotUrlButton,
@@ -830,6 +861,8 @@ class ManagerWindow(QMainWindow):
                     color: #ffffff;
                 }
 
+                QPushButton#addVideoDialogAddButton:hover,
+                QPushButton#addVideoButton:hover,
                 QPushButton#addQueueButton:hover,
                 QPushButton#addNextButton:hover,
                 QPushButton#saveBotUrlButton:hover,
@@ -839,6 +872,8 @@ class ManagerWindow(QMainWindow):
                     border-color: #6093dc;
                 }
 
+                QPushButton#addVideoDialogAddButton:pressed,
+                QPushButton#addVideoButton:pressed,
                 QPushButton#addQueueButton:pressed,
                 QPushButton#addNextButton:pressed,
                 QPushButton#saveBotUrlButton:pressed,
@@ -1412,7 +1447,11 @@ class ManagerWindow(QMainWindow):
         self._update_client()
 
         try:
+            player_state = self.bot_client.player_state()
             items = self.bot_client.queue()
+            playing_item = player_state.get("item")
+            if playing_item is not None:
+                items = [playing_item, *items]
         except BotClientError as exc:
             self._show_error(exc)
             return
@@ -1480,6 +1519,109 @@ class ManagerWindow(QMainWindow):
 
         self.status_label.setText(
             f"Exported {len(items)} queue item(s)."
+        )
+
+    def export_selected_queue_csv(self) -> None:
+        selected_ids = set(
+            self.queue_page.selected_queue_item_ids()
+        )
+
+        if not selected_ids:
+            self.status_label.setText(
+                "No queue items selected for export."
+            )
+            return
+
+        self._update_client()
+
+        try:
+            player_state = self.bot_client.player_state()
+            items = self.bot_client.queue()
+
+            playing_item = player_state.get("item")
+            if playing_item is not None:
+                items = [playing_item, *items]
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        items = [
+            item
+            for item in items
+            if item.get("id") in selected_ids
+        ]
+
+        if not items:
+            self.status_label.setText(
+                "Selected queue items are no longer available."
+            )
+            return
+
+        timestamp = datetime.now().strftime(
+            "%Y-%m-%d_%H%M%S"
+        )
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export LinkCue Queue Selection",
+            f"linkcue_queue_selected_{timestamp}.csv",
+            "CSV Files (*.csv)",
+        )
+
+        if not file_path:
+            return
+
+        fieldnames = [
+            "position",
+            "url",
+            "title",
+            "channel",
+            "platform",
+            "duration",
+            "submitted_by",
+            "status",
+        ]
+
+        try:
+            with open(
+                file_path,
+                "w",
+                newline="",
+                encoding="utf-8-sig",
+            ) as csv_file:
+                writer = csv.DictWriter(
+                    csv_file,
+                    fieldnames=fieldnames,
+                    extrasaction="ignore",
+                )
+                writer.writeheader()
+
+                for item in items:
+                    writer.writerow(
+                        {
+                            "position": item.get("position"),
+                            "url": item.get("url"),
+                            "title": item.get("title"),
+                            "channel": (
+                                item.get("video_channel")
+                                or item.get("channel")
+                            ),
+                            "platform": item.get("platform"),
+                            "duration": item.get("duration"),
+                            "submitted_by": item.get(
+                                "submitted_by"
+                            ),
+                            "status": item.get("status"),
+                        }
+                    )
+        except OSError as exc:
+            self.status_label.setText(
+                f"Selected queue export failed: {exc}"
+            )
+            return
+
+        self.status_label.setText(
+            f"Exported {len(items)} selected queue item(s)."
         )
 
     def export_history_csv(self) -> None:
@@ -1830,13 +1972,14 @@ class ManagerWindow(QMainWindow):
             return
 
         item_id, current_position = selected
-        queue_length = self.queue_page.queue_table.rowCount()
+        queue_length = self.queue_page.max_queue_position()
 
-        if target_position < 1:
-            target_position = 1
-
-        if target_position > queue_length:
-            target_position = queue_length
+        if target_position < 1 or target_position > queue_length:
+            self.status_label.setText(
+                f"Position {target_position} is outside the queue range "
+                f"(1-{queue_length})."
+            )
+            return
 
         if target_position == current_position:
             self.status_label.setText(
@@ -1871,7 +2014,7 @@ class ManagerWindow(QMainWindow):
             self.status_label.setText("Queue item is already at the top.")
             return
 
-        if target_position > self.queue_page.queue_table.rowCount():
+        if target_position > self.queue_page.max_queue_position():
             self.status_label.setText("Queue item is already at the bottom.")
             return
 
@@ -1899,8 +2042,35 @@ class ManagerWindow(QMainWindow):
 
     def move_selected_to_end(self) -> None:
         self._move_selected_to(
-            self.queue_page.queue_table.rowCount(),
+            self.queue_page.max_queue_position(),
             "Queue item moved to end.",
+        )
+
+    def move_selected_to_position(self) -> None:
+        selected = self._selected_queue_item()
+
+        if selected is None:
+            return
+
+        _, current_position = selected
+        queue_length = self.queue_page.max_queue_position()
+
+        target_position, accepted = QInputDialog.getInt(
+            self,
+            "Move Queue Item",
+            "Move selected item to position:",
+            current_position,
+            1,
+            queue_length,
+            1,
+        )
+
+        if not accepted:
+            return
+
+        self._move_selected_to(
+            target_position,
+            f"Queue item moved to position {target_position}.",
         )
 
     def remove_selected(self) -> None:
@@ -1992,6 +2162,34 @@ class ManagerWindow(QMainWindow):
         )
 
 
+    def _history_view_active(self) -> bool:
+        queue_page = getattr(self, "queue_page", None)
+
+        if queue_page is None:
+            return False
+
+        return getattr(queue_page, "view_mode", "queue") == "history"
+
+    def refresh_current_view(self, *_args) -> None:
+        if self._history_view_active():
+            self.refresh_history()
+        else:
+            self.refresh_queue()
+
+    def refresh_history(self) -> None:
+        self._update_client()
+
+        try:
+            items = self.bot_client.history()
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self._render_queue(items)
+        self.status_label.setText(
+            f"History loaded: {len(items)} item(s)."
+        )
+
     def refresh_queue(self, event: dict | None = None) -> None:
         if event:
             event_type = event.get("type")
@@ -2001,7 +2199,10 @@ class ManagerWindow(QMainWindow):
 
                 snapshot = event.get("snapshot")
                 if snapshot is not None:
-                    self._apply_queue_snapshot(snapshot)
+                    if ManagerWindow._history_view_active(self):
+                        self.refresh_history()
+                    else:
+                        self._apply_queue_snapshot(snapshot)
                     return
             elif event_type == "manager_presence_changed":
                 self.queue_page.manager_count_label.setText(
@@ -2019,6 +2220,10 @@ class ManagerWindow(QMainWindow):
                 return
 
             if event_type == "queue_changed":
+                if ManagerWindow._history_view_active(self):
+                    self.refresh_history()
+                    return
+
                 snapshot = event.get("snapshot")
 
                 if snapshot is not None:
@@ -2028,7 +2233,11 @@ class ManagerWindow(QMainWindow):
         self._update_client()
 
         try:
+            player_state = self.bot_client.player_state()
             items = self.bot_client.queue()
+            playing_item = player_state.get("item")
+            if playing_item is not None:
+                items = [playing_item, *items]
         except BotClientError as exc:
             self._show_error(exc)
             return
@@ -2036,7 +2245,9 @@ class ManagerWindow(QMainWindow):
         self._render_queue(items)
 
     def _apply_queue_snapshot(self, snapshot: dict) -> None:
-        items = snapshot.get("queued", [])
+        playing = snapshot.get("playing", [])
+        queued = snapshot.get("queued", [])
+        items = [*playing, *queued]
         self._render_queue(items)
 
     def _render_queue(self, items: list[dict]) -> None:

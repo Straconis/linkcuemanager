@@ -176,6 +176,12 @@ def test_add_video_to_end(qtbot, monkeypatch):
             assert submitted_by is None
             return {"id": 42}
 
+        def player_state(self):
+            return {
+                "state": "idle",
+                "item": None,
+            }
+
         def queue(self):
             return []
 
@@ -237,6 +243,12 @@ def test_add_next_moves_new_item_to_front(qtbot, monkeypatch):
                 "position": position,
             }
 
+        def player_state(self):
+            return {
+                "state": "idle",
+                "item": None,
+            }
+
         def queue(self):
             return []
 
@@ -287,6 +299,12 @@ def test_refresh_queue_metadata(qtbot):
             calls.append("refresh-metadata")
             return {"status": "ok"}
 
+        def player_state(self):
+            return {
+                "state": "idle",
+                "item": None,
+            }
+
         def queue(self):
             return []
 
@@ -317,6 +335,12 @@ def test_move_selected_up_uses_hidden_item_id(qtbot):
                 "position": position,
             }
 
+        def player_state(self):
+            return {
+                "state": "idle",
+                "item": None,
+            }
+
         def queue(self):
             return []
 
@@ -334,6 +358,8 @@ def test_move_selected_up_uses_hidden_item_id(qtbot):
     second.setData(Qt.ItemDataRole.UserRole, 42)
     second.setData(Qt.ItemDataRole.UserRole + 1, 2)
     window.queue_page.queue_table.setItem(1, 0, second)
+
+    window.queue_page._queue_items = [{'id': 10, 'position': 1}, {'id': 42, 'position': 2}]
 
     window.queue_page.queue_table.selectRow(1)
 
@@ -358,6 +384,12 @@ def test_move_selected_down_uses_hidden_item_id(qtbot):
                 "position": position,
             }
 
+        def player_state(self):
+            return {
+                "state": "idle",
+                "item": None,
+            }
+
         def queue(self):
             return []
 
@@ -375,6 +407,8 @@ def test_move_selected_down_uses_hidden_item_id(qtbot):
     second.setData(Qt.ItemDataRole.UserRole, 42)
     second.setData(Qt.ItemDataRole.UserRole + 1, 2)
     window.queue_page.queue_table.setItem(1, 0, second)
+
+    window.queue_page._queue_items = [{'id': 10, 'position': 1}, {'id': 42, 'position': 2}]
 
     window.queue_page.queue_table.selectRow(0)
 
@@ -461,6 +495,12 @@ def test_remove_selected_uses_hidden_item_id(qtbot):
             return {
                 "status": "deleted",
                 "id": item_id,
+            }
+
+        def player_state(self):
+            return {
+                "state": "idle",
+                "item": None,
             }
 
         def queue(self):
@@ -1296,3 +1336,485 @@ def test_restart_bot_confirm_requests_restart_once(
     window.restart_bot()
 
     assert calls == [True]
+
+
+def test_queue_snapshot_renders_now_playing_before_queued(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    rendered = []
+    window._render_queue = lambda items: rendered.extend(items)
+
+    window._apply_queue_snapshot(
+        {
+            "playing": [
+                {
+                    "id": 10,
+                    "title": "Now Playing",
+                    "status": "playing",
+                    "position": None,
+                }
+            ],
+            "queued": [
+                {
+                    "id": 11,
+                    "title": "Queued Video",
+                    "status": "queued",
+                    "position": 1,
+                }
+            ],
+        }
+    )
+
+    assert [item["id"] for item in rendered] == [10, 11]
+    assert rendered[0]["status"] == "playing"
+    assert rendered[1]["position"] == 1
+
+
+def test_manual_queue_refresh_includes_now_playing(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    calls = []
+
+    class FakeClient:
+        def player_state(self):
+            calls.append("player-state")
+            return {
+                "state": "playing",
+                "item": {
+                    "id": 20,
+                    "title": "Now Playing",
+                    "status": "playing",
+                    "position": None,
+                },
+            }
+
+        def queue(self):
+            calls.append("queue")
+            return [
+                {
+                    "id": 21,
+                    "title": "Queued Video",
+                    "status": "queued",
+                    "position": 1,
+                }
+            ]
+
+    rendered = []
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+    window._render_queue = lambda items: rendered.extend(items)
+
+    window.refresh_queue()
+
+    assert calls == ["player-state", "queue"]
+    assert [item["id"] for item in rendered] == [20, 21]
+    assert rendered[0]["status"] == "playing"
+    assert rendered[1]["position"] == 1
+
+
+
+def test_move_selected_to_position_uses_dialog_target(qtbot, monkeypatch):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    moved = []
+
+    class FakeClient:
+        def move_queue_item(self, item_id, position):
+            moved.append((item_id, position))
+            return {
+                "status": "moved",
+                "id": item_id,
+                "position": position,
+            }
+
+        def player_state(self):
+            return {
+                "state": "idle",
+                "item": None,
+            }
+
+        def queue(self):
+            return []
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.queue_page.queue_table.setRowCount(5)
+
+    for row, position in enumerate(range(1, 6)):
+        item = QTableWidgetItem(str(position))
+        item.setData(
+            Qt.ItemDataRole.UserRole,
+            42 if position == 2 else 100 + position,
+        )
+        item.setData(
+            Qt.ItemDataRole.UserRole + 1,
+            position,
+        )
+        window.queue_page.queue_table.setItem(row, 0, item)
+
+    window.queue_page._queue_items = [{'id': 101, 'position': 1}, {'id': 42, 'position': 2}, {'id': 103, 'position': 3}, {'id': 104, 'position': 4}, {'id': 105, 'position': 5}]
+
+    window.queue_page.queue_table.selectRow(1)
+
+    dialog_calls = []
+
+    def fake_get_int(
+        parent,
+        title,
+        label,
+        value,
+        minimum,
+        maximum,
+        step,
+    ):
+        dialog_calls.append(
+            (title, label, value, minimum, maximum, step)
+        )
+        return 4, True
+
+    monkeypatch.setattr(
+        "app.window.QInputDialog.getInt",
+        fake_get_int,
+    )
+
+    window.move_selected_to_position()
+
+    assert dialog_calls == [
+        (
+            "Move Queue Item",
+            "Move selected item to position:",
+            2,
+            1,
+            5,
+            1,
+        )
+    ]
+    assert moved == [(42, 4)]
+    assert (
+        window.status_label.text()
+        == "Queue item moved to position 4."
+    )
+
+
+def test_move_selected_to_position_cancel_is_noop(qtbot, monkeypatch):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    moved = []
+
+    class FakeClient:
+        def move_queue_item(self, item_id, position):
+            moved.append((item_id, position))
+            return {}
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.queue_page.queue_table.setRowCount(3)
+
+    item = QTableWidgetItem("2")
+    item.setData(Qt.ItemDataRole.UserRole, 42)
+    item.setData(Qt.ItemDataRole.UserRole + 1, 2)
+    window.queue_page.queue_table.setItem(1, 0, item)
+    window.queue_page.queue_table.selectRow(1)
+
+    monkeypatch.setattr(
+        "app.window.QInputDialog.getInt",
+        lambda *args, **kwargs: (2, False),
+    )
+
+    window.move_selected_to_position()
+
+    assert moved == []
+
+
+
+def test_move_to_position_excludes_now_playing_from_maximum(
+    qtbot,
+    monkeypatch,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    window.queue_page.queue_table.setRowCount(5)
+
+    now_playing = QTableWidgetItem("")
+    now_playing.setData(Qt.ItemDataRole.UserRole, 100)
+    now_playing.setData(Qt.ItemDataRole.UserRole + 1, None)
+    window.queue_page.queue_table.setItem(0, 0, now_playing)
+
+    for row, position in enumerate(range(1, 5), start=1):
+        item = QTableWidgetItem(str(position))
+        item.setData(Qt.ItemDataRole.UserRole, 200 + position)
+        item.setData(
+            Qt.ItemDataRole.UserRole + 1,
+            position,
+        )
+        window.queue_page.queue_table.setItem(row, 0, item)
+
+    window.queue_page._queue_items = [{'id': 100, 'position': None, 'status': 'playing'}, {'id': 201, 'position': 1}, {'id': 202, 'position': 2}, {'id': 203, 'position': 3}, {'id': 204, 'position': 4}]
+
+    window.queue_page.queue_table.selectRow(2)
+
+    dialog_calls = []
+
+    def fake_get_int(
+        parent,
+        title,
+        label,
+        value,
+        minimum,
+        maximum,
+        step,
+    ):
+        dialog_calls.append(
+            (value, minimum, maximum, step)
+        )
+        return value, False
+
+    monkeypatch.setattr(
+        "app.window.QInputDialog.getInt",
+        fake_get_int,
+    )
+
+    window.move_selected_to_position()
+
+    assert dialog_calls == [(2, 1, 4, 1)]
+
+
+def test_move_to_end_excludes_now_playing_from_queue_length(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    moved = []
+
+    class FakeClient:
+        def move_queue_item(self, item_id, position):
+            moved.append((item_id, position))
+            return {}
+
+        def player_state(self):
+            return {
+                "state": "idle",
+                "item": None,
+            }
+
+        def queue(self):
+            return []
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.queue_page.queue_table.setRowCount(5)
+
+    now_playing = QTableWidgetItem("")
+    now_playing.setData(Qt.ItemDataRole.UserRole, 100)
+    now_playing.setData(Qt.ItemDataRole.UserRole + 1, None)
+    window.queue_page.queue_table.setItem(0, 0, now_playing)
+
+    for row, position in enumerate(range(1, 5), start=1):
+        item = QTableWidgetItem(str(position))
+        item.setData(Qt.ItemDataRole.UserRole, 200 + position)
+        item.setData(
+            Qt.ItemDataRole.UserRole + 1,
+            position,
+        )
+        window.queue_page.queue_table.setItem(row, 0, item)
+
+    window.queue_page._queue_items = [{'id': 100, 'position': None, 'status': 'playing'}, {'id': 201, 'position': 1}, {'id': 202, 'position': 2}, {'id': 203, 'position': 3}, {'id': 204, 'position': 4}]
+
+    window.queue_page.queue_table.selectRow(2)
+
+    window.move_selected_to_end()
+
+    assert moved == [(202, 4)]
+
+
+def test_move_selected_to_rejects_position_outside_real_queue(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    moved = []
+
+    class FakeClient:
+        def move_queue_item(self, item_id, position):
+            moved.append((item_id, position))
+            return {}
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.queue_page.queue_table.setRowCount(3)
+
+    first = QTableWidgetItem("1")
+    first.setData(Qt.ItemDataRole.UserRole, 10)
+    first.setData(Qt.ItemDataRole.UserRole + 1, 1)
+    window.queue_page.queue_table.setItem(0, 0, first)
+
+    second = QTableWidgetItem("2")
+    second.setData(Qt.ItemDataRole.UserRole, 20)
+    second.setData(Qt.ItemDataRole.UserRole + 1, 2)
+    window.queue_page.queue_table.setItem(1, 0, second)
+
+    window.queue_page._queue_items = [{'id': 10, 'position': 1}, {'id': 20, 'position': 2}]
+
+    window.queue_page.queue_table.selectRow(0)
+
+    window._move_selected_to(
+        3,
+        "should not happen",
+    )
+
+    assert moved == []
+    assert (
+        window.status_label.text()
+        == "Position 3 is outside the queue range (1-2)."
+    )
+
+
+
+def test_export_selected_queue_items_uses_selected_ids():
+    import inspect
+
+    from app.window import ManagerWindow
+
+    source = inspect.getsource(
+        ManagerWindow.export_selected_queue_csv
+    )
+
+    assert "selected_queue_item_ids" in source
+    assert "Export LinkCue Queue Selection" in source
+
+
+def test_queue_page_exposes_selected_queue_item_ids():
+    from app.pages.queue_page import QueuePage
+
+    assert hasattr(
+        QueuePage,
+        "selected_queue_item_ids",
+    )
+
+
+def test_max_queue_position_uses_full_queue_when_filtered(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    window.queue_page.render_items(
+        [
+            {
+                "id": 10,
+                "position": 1,
+                "title": "Visible Video",
+                "status": "queued",
+            },
+            {
+                "id": 20,
+                "position": 2,
+                "title": "Hidden Video A",
+                "status": "queued",
+            },
+            {
+                "id": 30,
+                "position": 3,
+                "title": "Hidden Video B",
+                "status": "queued",
+            },
+        ]
+    )
+
+    assert window.queue_page.max_queue_position() == 3
+
+    window.queue_page.apply_search("Visible Video")
+
+    assert window.queue_page.queue_table.rowCount() == 1
+    assert window.queue_page.max_queue_position() == 3
+
+
+
+def test_refresh_current_view_loads_history(qtbot, monkeypatch):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+
+    history_items = [
+        {
+            "id": 99,
+            "position": None,
+            "title": "Played Video",
+            "status": "played",
+        }
+    ]
+
+    monkeypatch.setattr(
+        window.bot_client,
+        "history",
+        lambda: history_items,
+    )
+
+    window.queue_page.set_view_mode("history")
+    window.refresh_current_view()
+
+    assert window.queue_page.view_mode == "history"
+    assert window.queue_page._queue_items == history_items
+    assert window.queue_page.queue_table.rowCount() == 1
+
+
+def test_queue_changed_does_not_replace_history(
+    qtbot,
+    monkeypatch,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+
+    history_items = [
+        {
+            "id": 99,
+            "position": None,
+            "title": "Played Video",
+            "status": "played",
+        }
+    ]
+
+    monkeypatch.setattr(
+        window.bot_client,
+        "history",
+        lambda: history_items,
+    )
+
+    window.queue_page.set_view_mode("history")
+    window.refresh_current_view()
+
+    window.refresh_queue(
+        {
+            "type": "queue_changed",
+            "snapshot": {
+                "playing": [],
+                "queued": [
+                    {
+                        "id": 1,
+                        "position": 1,
+                        "title": "Queued Video",
+                        "status": "queued",
+                    }
+                ],
+            },
+        }
+    )
+
+    assert window.queue_page.view_mode == "history"
+    assert window.queue_page._queue_items == history_items

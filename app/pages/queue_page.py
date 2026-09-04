@@ -1,4 +1,4 @@
-﻿from collections.abc import Callable
+from collections.abc import Callable
 
 from PySide6.QtCore import QSize, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QPixmap
@@ -9,10 +9,13 @@ from PySide6.QtNetwork import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
+    QDialog,
     QFrame,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QMenu,
     QPushButton,
@@ -105,8 +108,9 @@ class QueueCard(QFrame):
             True,
         )
 
+        badge_text = "NP" if item.get("status") == "playing" else ("" if position is None else str(position))
         self.position_label = QLabel(
-            "" if position is None else str(position),
+            badge_text,
             self.media_container,
         )
         self.position_label.setObjectName("queuePositionBadge")
@@ -272,12 +276,14 @@ class QueuePage(QWidget):
         add_video_callback: Callable[[], None],
         refresh_metadata_callback: Callable[[], None],
         export_queue_callback: Callable[[], None],
+        export_selected_callback: Callable[[], None],
         export_history_callback: Callable[[], None],
         import_queue_callback: Callable[[], None],
         move_to_beginning_callback: Callable[[], None],
         move_up_callback: Callable[[], None],
         move_down_callback: Callable[[], None],
         move_to_end_callback: Callable[[], None],
+        move_to_position_callback: Callable[[], None],
         remove_callback: Callable[[], None],
         clear_queue_callback: Callable[[], None],
         parent: QWidget | None = None,
@@ -285,6 +291,11 @@ class QueuePage(QWidget):
         super().__init__(parent)
 
         self._network_manager = QNetworkAccessManager(self)
+        self._queue_items: list[dict] = []
+        self.view_mode = "queue"
+        self._search_query = ""
+        self._filter_platform: str | None = None
+        self._filter_status: str | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 12)
@@ -302,6 +313,9 @@ class QueuePage(QWidget):
         title = QLabel("Current Bot Queue")
         title.setStyleSheet("font-weight: bold;")
 
+        self.video_count_label = QLabel("Videos: 0")
+        self.video_count_label.setObjectName("videoCountLabel")
+
         self.player_count_label = QLabel(
             "Players Connected: 0"
         )
@@ -317,6 +331,8 @@ class QueuePage(QWidget):
         )
 
         header.addWidget(title)
+        header.addSpacing(12)
+        header.addWidget(self.video_count_label)
         header.addStretch()
         header.addWidget(self.player_count_label)
         header.addSpacing(12)
@@ -326,6 +342,16 @@ class QueuePage(QWidget):
 
         queue_controls = QHBoxLayout()
 
+        self.view_toggle_button = QPushButton(
+            "View History"
+        )
+        self.view_toggle_button.setObjectName(
+            "queueViewToggleButton"
+        )
+        self.view_toggle_button.clicked.connect(
+            self.toggle_view_mode
+        )
+
         self.add_video_button = QPushButton(
             "Add Video"
         )
@@ -334,6 +360,30 @@ class QueuePage(QWidget):
         )
         self.add_video_button.clicked.connect(
             add_video_callback
+        )
+
+        self.search_button = QPushButton("Search")
+        self.search_button.setObjectName(
+            "queueSearchButton"
+        )
+        self.search_button.clicked.connect(
+            self.show_search_dialog
+        )
+
+        self.filters_button = QPushButton("Filters")
+        self.filters_button.setObjectName(
+            "queueFiltersButton"
+        )
+        self.filters_button.clicked.connect(
+            self.show_filter_dialog
+        )
+
+        self.select_all_button = QPushButton("Select All")
+        self.select_all_button.setObjectName(
+            "queueSelectAllButton"
+        )
+        self.select_all_button.clicked.connect(
+            self.toggle_select_all
         )
 
         self.move_to_beginning_button = QPushButton(
@@ -404,6 +454,16 @@ class QueuePage(QWidget):
             refresh_callback
         )
 
+        self.import_export_button = QPushButton(
+            "Import / Export"
+        )
+        self.import_export_button.setObjectName(
+            "queueImportExportButton"
+        )
+        self.import_export_button.clicked.connect(
+            self.show_import_export_dialog
+        )
+
         self.export_queue_button = QPushButton(
             "Export Queue"
         )
@@ -412,6 +472,16 @@ class QueuePage(QWidget):
         )
         self.export_queue_button.clicked.connect(
             export_queue_callback
+        )
+
+        self.export_selected_button = QPushButton(
+            "Export Selected"
+        )
+        self.export_selected_button.setObjectName(
+            "exportSelectedButton"
+        )
+        self.export_selected_button.clicked.connect(
+            export_selected_callback
         )
 
         self.export_history_button = QPushButton(
@@ -445,7 +515,22 @@ class QueuePage(QWidget):
         )
 
         queue_controls.addWidget(
+            self.view_toggle_button
+        )
+        queue_controls.addWidget(
             self.add_video_button
+        )
+        queue_controls.addWidget(
+            self.search_button
+        )
+        queue_controls.addWidget(
+            self.filters_button
+        )
+        queue_controls.addWidget(
+            self.select_all_button
+        )
+        queue_controls.addWidget(
+            self.import_export_button
         )
         queue_controls.addWidget(
             self.move_to_beginning_button
@@ -468,16 +553,6 @@ class QueuePage(QWidget):
         queue_controls.addStretch()
 
         maintenance_controls = QHBoxLayout()
-
-        maintenance_controls.addWidget(
-            self.import_queue_button
-        )
-        maintenance_controls.addWidget(
-            self.export_queue_button
-        )
-        maintenance_controls.addWidget(
-            self.export_history_button
-        )
 
         maintenance_controls.addStretch()
 
@@ -509,7 +584,7 @@ class QueuePage(QWidget):
             QAbstractItemView.SelectionBehavior.SelectRows
         )
         self.queue_table.setSelectionMode(
-            QAbstractItemView.SelectionMode.SingleSelection
+            QAbstractItemView.SelectionMode.ExtendedSelection
         )
         self.queue_table.setShowGrid(False)
         self.queue_table.setWordWrap(True)
@@ -531,6 +606,7 @@ class QueuePage(QWidget):
                 move_up_callback,
                 move_down_callback,
                 move_to_end_callback,
+                move_to_position_callback,
                 remove_callback,
             )
         )
@@ -539,6 +615,216 @@ class QueuePage(QWidget):
 
         layout.addWidget(group, 1)
 
+    def toggle_view_mode(self) -> None:
+        if self.view_mode == "queue":
+            self.set_view_mode("history")
+        else:
+            self.set_view_mode("queue")
+
+    def set_view_mode(self, mode: str) -> None:
+        if mode not in {"queue", "history"}:
+            raise ValueError(
+                f"Unsupported queue view mode: {mode}"
+            )
+
+        self.view_mode = mode
+        history_mode = mode == "history"
+
+        self.view_toggle_button.setText(
+            "View Queue"
+            if history_mode
+            else "View History"
+        )
+
+        queue_only_controls = (
+            self.add_video_button,
+            self.select_all_button,
+            self.move_to_beginning_button,
+            self.move_up_button,
+            self.move_down_button,
+            self.move_to_end_button,
+            self.remove_selected_button,
+            self.clear_queue_button,
+            self.refresh_metadata_button,
+        )
+
+        for control in queue_only_controls:
+            control.setEnabled(not history_mode)
+
+        if history_mode:
+            self.queue_table.clearSelection()
+            self.select_all_button.setText("Select All")
+
+    def selected_queue_item_ids(self) -> list[int]:
+        selected_ids = []
+
+        for index in self.queue_table.selectionModel().selectedRows():
+            item = self.queue_table.item(index.row(), 0)
+
+            if item is None:
+                continue
+
+            position = item.data(
+                Qt.ItemDataRole.UserRole + 1
+            )
+
+            try:
+                position = int(position)
+            except (TypeError, ValueError):
+                continue
+
+            if position < 1:
+                continue
+
+            item_id = item.data(
+                Qt.ItemDataRole.UserRole
+            )
+
+            try:
+                item_id = int(item_id)
+            except (TypeError, ValueError):
+                continue
+
+            selected_ids.append(item_id)
+
+        return selected_ids
+
+    def show_import_export_dialog(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Import / Export")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+
+        layout.addWidget(self.import_queue_button)
+        layout.addWidget(self.export_queue_button)
+        layout.addWidget(self.export_selected_button)
+        layout.addWidget(self.export_history_button)
+
+        dialog.exec()
+
+    def toggle_select_all(self) -> None:
+        selectable_rows = []
+
+        for row in range(self.queue_table.rowCount()):
+            item = self.queue_table.item(row, 0)
+
+            if item is None:
+                continue
+
+            position = item.data(
+                Qt.ItemDataRole.UserRole + 1
+            )
+
+            try:
+                position = int(position)
+            except (TypeError, ValueError):
+                continue
+
+            if position >= 1:
+                selectable_rows.append(row)
+
+        selected_rows = {
+            index.row()
+            for index
+            in self.queue_table.selectionModel().selectedRows()
+        }
+
+        all_selected = (
+            bool(selectable_rows)
+            and all(
+                row in selected_rows
+                for row in selectable_rows
+            )
+        )
+
+        if all_selected:
+            self.queue_table.clearSelection()
+            self.select_all_button.setText("Select All")
+            return
+
+        self.queue_table.clearSelection()
+
+        for row in selectable_rows:
+            item = self.queue_table.item(row, 0)
+
+            if item is not None:
+                item.setSelected(True)
+
+        self.select_all_button.setText("Deselect All")
+
+    def show_search_dialog(self) -> None:
+        if self._search_query:
+            self.apply_search("")
+            return
+
+        view_name = (
+            "History"
+            if self.view_mode == "history"
+            else "Queue"
+        )
+
+        query, accepted = QInputDialog.getText(
+            self,
+            f"Search {view_name}",
+            "Search title, channel, URL, submitter, or platform:",
+        )
+
+        if accepted:
+            self.apply_search(query)
+
+    def show_filter_dialog(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Queue Filters")
+        dialog.setModal(True)
+
+        layout = QVBoxLayout(dialog)
+
+        layout.addWidget(QLabel("Platform"))
+
+        platform_combo = QComboBox()
+        platform_combo.addItem("Any", None)
+        platform_combo.addItem("YouTube", "youtube")
+        platform_combo.addItem("TikTok", "tiktok")
+        layout.addWidget(platform_combo)
+
+        layout.addWidget(QLabel("Status"))
+
+        status_combo = QComboBox()
+        status_combo.addItem("Any", None)
+        status_combo.addItem("Queued", "queued")
+        status_combo.addItem("Playing", "playing")
+        status_combo.addItem("Played", "played")
+        layout.addWidget(status_combo)
+
+        button_row = QHBoxLayout()
+
+        clear_button = QPushButton("Clear")
+        apply_button = QPushButton("Apply")
+
+        button_row.addWidget(clear_button)
+        button_row.addWidget(apply_button)
+        layout.addLayout(button_row)
+
+        def clear_filters() -> None:
+            self.apply_filters()
+            dialog.accept()
+
+        def apply_selected_filters() -> None:
+            self.apply_filters(
+                platform=platform_combo.currentData(),
+                status=status_combo.currentData(),
+            )
+            dialog.accept()
+
+        clear_button.clicked.connect(clear_filters)
+        apply_button.clicked.connect(
+            apply_selected_filters
+        )
+
+        dialog.exec()
+
     def _show_queue_context_menu(
         self,
         pos,
@@ -546,6 +832,7 @@ class QueuePage(QWidget):
         move_up_callback: Callable[[], None],
         move_down_callback: Callable[[], None],
         move_to_end_callback: Callable[[], None],
+        move_to_position_callback: Callable[[], None],
         remove_callback: Callable[[], None],
     ) -> None:
         index = self.queue_table.indexAt(pos)
@@ -580,6 +867,9 @@ class QueuePage(QWidget):
         move_up_action = menu.addAction("Move Up")
         move_down_action = menu.addAction("Move Down")
         move_end_action = menu.addAction("Move to End")
+        move_position_action = menu.addAction(
+            "Move to Position..."
+        )
 
         menu.addSeparator()
 
@@ -593,8 +883,11 @@ class QueuePage(QWidget):
         menu.addSeparator()
 
         remove_action = menu.addAction("Remove")
+        is_queue_item = position is not None
+        remove_action.setEnabled(is_queue_item)
 
-        if position is not None:
+
+        if is_queue_item:
             at_top = position <= 1
             at_bottom = position >= row_count
 
@@ -602,6 +895,13 @@ class QueuePage(QWidget):
             move_up_action.setEnabled(not at_top)
             move_down_action.setEnabled(not at_bottom)
             move_end_action.setEnabled(not at_bottom)
+            move_position_action.setEnabled(True)
+        else:
+            move_beginning_action.setEnabled(False)
+            move_up_action.setEnabled(False)
+            move_down_action.setEnabled(False)
+            move_end_action.setEnabled(False)
+            move_position_action.setEnabled(False)
 
         selected_action = menu.exec(
             self.queue_table.viewport().mapToGlobal(pos)
@@ -615,13 +915,117 @@ class QueuePage(QWidget):
             move_down_callback()
         elif selected_action is move_end_action:
             move_to_end_callback()
+        elif selected_action is move_position_action:
+            move_to_position_callback()
         elif selected_action is open_link_action:
             if isinstance(card, QueueCard):
                 card.open_link_button.click()
         elif selected_action is remove_action:
             remove_callback()
 
+    def max_queue_position(self) -> int:
+        positions = []
+
+        for item in self._queue_items:
+            position = item.get("position")
+
+            try:
+                position = int(position)
+            except (TypeError, ValueError):
+                continue
+
+            if position >= 1:
+                positions.append(position)
+
+        return max(positions, default=0)
+
     def render_items(self, items: list[dict]) -> None:
+        self._queue_items = list(items)
+        self._refresh_local_view()
+
+    def apply_search(self, query: str) -> None:
+        self._search_query = query.strip().casefold()
+
+        self.search_button.setText(
+            "Clear Search"
+            if self._search_query
+            else "Search"
+        )
+
+        self._refresh_local_view()
+
+    def apply_filters(
+        self,
+        *,
+        platform: str | None = None,
+        status: str | None = None,
+    ) -> None:
+        self._filter_platform = (
+            platform.strip().casefold()
+            if platform
+            else None
+        )
+        self._filter_status = (
+            status.strip().casefold()
+            if status
+            else None
+        )
+        self._refresh_local_view()
+
+    def _refresh_local_view(self) -> None:
+        searchable_fields = (
+            "title",
+            "video_channel",
+            "channel",
+            "url",
+            "submitted_by",
+            "platform",
+        )
+
+        visible_items = []
+
+        for item in self._queue_items:
+            if self._search_query and not any(
+                self._search_query
+                in str(item.get(field) or "").casefold()
+                for field in searchable_fields
+            ):
+                continue
+
+            if (
+                self._filter_platform is not None
+                and str(item.get("platform") or "").casefold()
+                != self._filter_platform
+            ):
+                continue
+
+            if (
+                self._filter_status is not None
+                and str(item.get("status") or "").casefold()
+                != self._filter_status
+            ):
+                continue
+
+            visible_items.append(item)
+
+        self._render_visible_items(visible_items)
+
+    def _render_visible_items(self, items: list[dict]) -> None:
+        self.video_count_label.setText(f"Videos: {len(items)}")
+        selected_item_id = None
+        selected_row = self.queue_table.currentRow()
+
+        if selected_row >= 0:
+            selected_item = self.queue_table.item(
+                selected_row,
+                0,
+            )
+
+            if selected_item is not None:
+                selected_item_id = selected_item.data(
+                    Qt.ItemDataRole.UserRole
+                )
+
         self.queue_table.clearContents()
         self.queue_table.setRowCount(len(items))
 
@@ -662,6 +1066,12 @@ class QueuePage(QWidget):
             )
 
             thumbnail_url = item.get("thumbnail")
+
+            if (
+                selected_item_id is not None
+                and item.get("id") == selected_item_id
+            ):
+                self.queue_table.selectRow(row)
 
             if thumbnail_url:
                 self._load_thumbnail(
