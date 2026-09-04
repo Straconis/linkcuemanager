@@ -1818,3 +1818,168 @@ def test_queue_changed_does_not_replace_history(
 
     assert window.queue_page.view_mode == "history"
     assert window.queue_page._queue_items == history_items
+
+def test_save_streamer_settings_splits_shared_and_manager_settings(
+    qtbot,
+    monkeypatch,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    shared_settings = {
+        "bot_url": "http://example.test",
+    }
+    manager_settings = {
+        "manager_username": "Steve",
+        "dark_mode": True,
+    }
+
+    saved_shared = []
+    saved_manager = []
+
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: dict(shared_settings),
+    )
+    monkeypatch.setattr(
+        "app.window.save_shared_settings",
+        lambda settings: saved_shared.append(dict(settings)),
+    )
+    monkeypatch.setattr(
+        "app.window.load_manager_settings",
+        lambda: dict(manager_settings),
+    )
+    monkeypatch.setattr(
+        "app.window.save_manager_settings",
+        lambda settings: saved_manager.append(dict(settings)),
+    )
+
+    window.streamer_page.streamer_name_input.setText(
+        "smokeeeg"
+    )
+    window.streamer_page.twitch_url_input.setText(
+        "https://twitch.tv/smokeeeg"
+    )
+    window.streamer_page.populate_from_twitch_toggle.setChecked(
+        True
+    )
+
+    window.save_streamer_settings()
+
+    assert saved_shared == [
+        {
+            "bot_url": "http://example.test",
+            "streamer_name": "smokeeeg",
+            "streamer_twitch_url": (
+                "https://twitch.tv/smokeeeg"
+            ),
+        }
+    ]
+
+    assert saved_manager == [
+        {
+            "manager_username": "Steve",
+            "dark_mode": True,
+            "populate_from_twitch_url": True,
+        }
+    ]
+
+
+def test_window_loads_streamer_identity_from_shared_settings(
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: {
+            "streamer_name": "smokeeeg",
+            "streamer_twitch_url": (
+                "https://twitch.tv/smokeeeg"
+            ),
+        },
+    )
+
+    monkeypatch.setattr(
+        "app.window.load_manager_settings",
+        lambda: {
+            "populate_from_twitch_url": True,
+        },
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    assert (
+        window.streamer_page.streamer_name()
+        == "smokeeeg"
+    )
+
+    assert (
+        window.streamer_page.twitch_url()
+        == "https://twitch.tv/smokeeeg"
+    )
+
+    assert (
+        window.streamer_page
+        .populate_from_twitch_enabled()
+        is True
+    )
+
+    assert (
+        window.twitch_page.entered_channel()
+        == "smokeeeg"
+    )
+
+
+def test_window_migrates_legacy_streamer_identity_to_shared_settings(
+    qtbot,
+    monkeypatch,
+):
+    shared_settings = {}
+
+    manager_settings = {
+        "streamer_name": "smokeeeg",
+        "streamer_twitch_url": (
+            "https://twitch.tv/smokeeeg"
+        ),
+        "populate_from_twitch_url": True,
+    }
+
+    saved_shared = []
+
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: dict(shared_settings),
+    )
+
+    monkeypatch.setattr(
+        "app.window.load_manager_settings",
+        lambda: dict(manager_settings),
+    )
+
+    monkeypatch.setattr(
+        "app.window.save_shared_settings",
+        lambda settings: saved_shared.append(dict(settings)),
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    assert (
+        window.streamer_page.streamer_name()
+        == "smokeeeg"
+    )
+
+    assert (
+        window.streamer_page.twitch_url()
+        == "https://twitch.tv/smokeeeg"
+    )
+
+    assert saved_shared == [
+        {
+            "streamer_name": "smokeeeg",
+            "streamer_twitch_url": (
+                "https://twitch.tv/smokeeeg"
+            ),
+        }
+    ]

@@ -286,18 +286,61 @@ class ManagerWindow(QMainWindow):
         )
 
         streamer_name = str(
-            self.manager_settings.get(
+            self.shared_settings.get(
                 "streamer_name",
                 "",
             )
         )
 
         streamer_twitch_url = str(
+            self.shared_settings.get(
+                "streamer_twitch_url",
+                "",
+            )
+        )
+
+        legacy_streamer_name = str(
+            self.manager_settings.get(
+                "streamer_name",
+                "",
+            )
+        )
+
+        legacy_streamer_twitch_url = str(
             self.manager_settings.get(
                 "streamer_twitch_url",
                 "",
             )
         )
+
+        streamer_identity_migrated = False
+
+        if (
+            not streamer_name
+            and legacy_streamer_name
+        ):
+            streamer_name = legacy_streamer_name
+            self.shared_settings["streamer_name"] = (
+                legacy_streamer_name
+            )
+            streamer_identity_migrated = True
+
+        if (
+            not streamer_twitch_url
+            and legacy_streamer_twitch_url
+        ):
+            streamer_twitch_url = (
+                legacy_streamer_twitch_url
+            )
+            self.shared_settings["streamer_twitch_url"] = (
+                legacy_streamer_twitch_url
+            )
+            streamer_identity_migrated = True
+
+        if streamer_identity_migrated:
+            save_shared_settings(
+                self.shared_settings
+            )
 
         populate_from_twitch = bool(
             self.manager_settings.get(
@@ -1349,13 +1392,30 @@ class ManagerWindow(QMainWindow):
                 streamer_name
             )
 
-        manager_settings = load_manager_settings()
+        shared_settings = load_shared_settings()
 
-        manager_settings["streamer_name"] = (
+        shared_settings["streamer_name"] = (
             streamer_name
         )
-        manager_settings["streamer_twitch_url"] = (
+        shared_settings["streamer_twitch_url"] = (
             twitch_url
+        )
+
+        save_shared_settings(
+            shared_settings
+        )
+
+        self.shared_settings = shared_settings
+
+        manager_settings = load_manager_settings()
+
+        manager_settings.pop(
+            "streamer_name",
+            None,
+        )
+        manager_settings.pop(
+            "streamer_twitch_url",
+            None,
         )
         manager_settings["populate_from_twitch_url"] = (
             populate_from_twitch
