@@ -9,6 +9,7 @@ from PySide6.QtNetwork import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QComboBox,
     QDialog,
     QFrame,
@@ -172,6 +173,13 @@ class QueueCard(QFrame):
         self.url_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
+        self.url_label.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.url_label.customContextMenuRequested.connect(
+            lambda position, url=url:
+            self._show_url_context_menu(position, url)
+        )
 
         for label in (
             self.title_label,
@@ -210,6 +218,24 @@ class QueueCard(QFrame):
         )
 
         self._update_media_layout()
+
+    def _show_url_context_menu(
+        self,
+        position,
+        url: str,
+    ) -> None:
+        if not url:
+            return
+
+        menu = QMenu(self.url_label)
+        copy_action = menu.addAction("Copy Link")
+
+        selected_action = menu.exec(
+            self.url_label.mapToGlobal(position)
+        )
+
+        if selected_action is copy_action:
+            QApplication.clipboard().setText(url)
 
     def _update_media_layout(self) -> None:
         # The full thumbnail is preferred.
@@ -296,6 +322,8 @@ class QueuePage(QWidget):
         self._search_query = ""
         self._filter_platform: str | None = None
         self._filter_status: str | None = None
+        self._sort_by: str | None = None
+        self._sort_descending = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 12)
@@ -376,6 +404,14 @@ class QueuePage(QWidget):
         )
         self.filters_button.clicked.connect(
             self.show_filter_dialog
+        )
+
+        self.sort_button = QPushButton("Sort")
+        self.sort_button.setObjectName(
+            "queueSortButton"
+        )
+        self.sort_button.clicked.connect(
+            self.show_sort_dialog
         )
 
         self.select_all_button = QPushButton("Select All")
@@ -525,6 +561,9 @@ class QueuePage(QWidget):
         )
         queue_controls.addWidget(
             self.filters_button
+        )
+        queue_controls.addWidget(
+            self.sort_button
         )
         queue_controls.addWidget(
             self.select_all_button
@@ -825,6 +864,80 @@ class QueuePage(QWidget):
 
         dialog.exec()
 
+    def show_sort_dialog(self) -> None:
+        dialog = QDialog(self)
+
+        view_name = (
+            "History"
+            if self.view_mode == "history"
+            else "Queue"
+        )
+
+        dialog.setWindowTitle(f"{view_name} Sort")
+        dialog.setModal(True)
+
+        layout = QVBoxLayout(dialog)
+
+        layout.addWidget(QLabel("Sort By"))
+
+        sort_combo = QComboBox()
+        sort_combo.addItem("Queue Position", "position")
+        sort_combo.addItem("Title", "title")
+        sort_combo.addItem(
+            "Channel / Creator",
+            "channel",
+        )
+        sort_combo.addItem("Platform", "platform")
+        sort_combo.addItem("Submitter", "submitted_by")
+        sort_combo.addItem("Added", "created_at")
+        sort_combo.addItem("Played", "played_at")
+        layout.addWidget(sort_combo)
+
+        if self._sort_by is not None:
+            index = sort_combo.findData(self._sort_by)
+
+            if index >= 0:
+                sort_combo.setCurrentIndex(index)
+
+        layout.addWidget(QLabel("Direction"))
+
+        direction_combo = QComboBox()
+        direction_combo.addItem("Ascending", False)
+        direction_combo.addItem("Descending", True)
+        direction_combo.setCurrentIndex(
+            1 if self._sort_descending else 0
+        )
+        layout.addWidget(direction_combo)
+
+        button_row = QHBoxLayout()
+
+        clear_button = QPushButton("Clear")
+        apply_button = QPushButton("Apply")
+
+        button_row.addWidget(clear_button)
+        button_row.addWidget(apply_button)
+        layout.addLayout(button_row)
+
+        def clear_sort() -> None:
+            self.apply_sort()
+            dialog.accept()
+
+        def apply_selected_sort() -> None:
+            self.apply_sort(
+                sort_by=sort_combo.currentData(),
+                descending=bool(
+                    direction_combo.currentData()
+                ),
+            )
+            dialog.accept()
+
+        clear_button.clicked.connect(clear_sort)
+        apply_button.clicked.connect(
+            apply_selected_sort
+        )
+
+        dialog.exec()
+
     def _show_queue_context_menu(
         self,
         pos,
@@ -972,6 +1085,23 @@ class QueuePage(QWidget):
         )
         self._refresh_local_view()
 
+    def apply_sort(
+        self,
+        *,
+        sort_by: str | None = None,
+        descending: bool = False,
+    ) -> None:
+        self._sort_by = sort_by
+        self._sort_descending = bool(descending)
+
+        self.sort_button.setText(
+            "Sort (Active)"
+            if self._sort_by
+            else "Sort"
+        )
+
+        self._refresh_local_view()
+
     def _refresh_local_view(self) -> None:
         searchable_fields = (
             "title",
@@ -1007,6 +1137,52 @@ class QueuePage(QWidget):
                 continue
 
             visible_items.append(item)
+
+        if self._sort_by is not None:
+            populated_items = []
+            missing_items = []
+
+            for item in visible_items:
+                if self._sort_by == "channel":
+                    value = (
+                        item.get("video_channel")
+                        or item.get("channel")
+                    )
+                else:
+                    value = item.get(self._sort_by)
+
+                if value is None or value == "":
+                    missing_items.append(item)
+                    continue
+
+                populated_items.append(item)
+
+            def sort_key(item: dict):
+                if self._sort_by == "channel":
+                    value = (
+                        item.get("video_channel")
+                        or item.get("channel")
+                        or ""
+                    )
+                else:
+                    value = item.get(self._sort_by)
+
+                if self._sort_by == "position":
+                    try:
+                        return int(value)
+                    except (TypeError, ValueError):
+                        return 0
+
+                return str(value or "").casefold()
+
+            populated_items.sort(
+                key=sort_key,
+                reverse=self._sort_descending,
+            )
+
+            visible_items = (
+                populated_items + missing_items
+            )
 
         self._render_visible_items(visible_items)
 

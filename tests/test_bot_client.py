@@ -63,6 +63,34 @@ def test_queue():
     ]
 
 
+def test_history_uses_api_history_endpoint():
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.path == "/api/history"
+
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": 7,
+                    "url": "https://youtu.be/history-example",
+                    "status": "played",
+                }
+            ],
+        )
+
+    client = make_client(handler)
+
+    assert client.history() == [
+        {
+            "id": 7,
+            "url": "https://youtu.be/history-example",
+            "status": "played",
+        }
+    ]
+
+
+
 def test_queue_rejects_non_list_response():
     def handler(request):
         return httpx.Response(

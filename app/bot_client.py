@@ -130,7 +130,7 @@ class BotClient:
         return result
 
     def history(self) -> list[dict]:
-        result = self._request("GET", "/history")
+        result = self._request("GET", "/api/history")
 
         if not isinstance(result, list):
             raise BotClientError(

@@ -1,6 +1,8 @@
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QPushButton
 
-from app.pages.queue_page import QueuePage
+import app.pages.queue_page as queue_page_module
+from app.pages.queue_page import QueueCard, QueuePage
 
 
 def _noop():
@@ -728,3 +730,176 @@ def test_clear_search_preserves_filters():
     assert page._search_query == ""
     assert page._filter_platform == "youtube"
     assert page.queue_table.rowCount() == 1
+
+
+def test_local_sort_changes_display_without_reordering_bot_items():
+    page = _build_page()
+
+    items = [
+        {
+            "id": 1,
+            "position": 1,
+            "title": "Beta",
+            "status": "queued",
+        },
+        {
+            "id": 2,
+            "position": 2,
+            "title": "Alpha",
+            "status": "queued",
+        },
+        {
+            "id": 3,
+            "position": 3,
+            "title": "Charlie",
+            "status": "queued",
+        },
+    ]
+
+    page.render_items(items)
+
+    assert [
+        item["id"]
+        for item in page._queue_items
+    ] == [1, 2, 3]
+
+    page.apply_sort(
+        sort_by="title",
+        descending=False,
+    )
+
+    assert [
+        page.queue_table.item(row, 0).data(
+            Qt.ItemDataRole.UserRole
+        )
+        for row in range(page.queue_table.rowCount())
+    ] == [2, 1, 3]
+
+    assert [
+        item["id"]
+        for item in page._queue_items
+    ] == [1, 2, 3]
+
+    assert page.sort_button.text() == "Sort (Active)"
+
+    page.apply_sort(
+        sort_by="title",
+        descending=True,
+    )
+
+    assert [
+        page.queue_table.item(row, 0).data(
+            Qt.ItemDataRole.UserRole
+        )
+        for row in range(page.queue_table.rowCount())
+    ] == [3, 1, 2]
+
+    assert [
+        item["id"]
+        for item in page._queue_items
+    ] == [1, 2, 3]
+
+    page.apply_sort()
+
+    assert [
+        page.queue_table.item(row, 0).data(
+            Qt.ItemDataRole.UserRole
+        )
+        for row in range(page.queue_table.rowCount())
+    ] == [1, 2, 3]
+
+    assert page.sort_button.text() == "Sort"
+
+
+def test_local_sort_applies_after_filters():
+    page = _build_page()
+
+    page.render_items(
+        [
+            {
+                "id": 1,
+                "position": 1,
+                "title": "Beta",
+                "platform": "youtube",
+                "status": "queued",
+            },
+            {
+                "id": 2,
+                "position": 2,
+                "title": "Alpha",
+                "platform": "tiktok",
+                "status": "queued",
+            },
+            {
+                "id": 3,
+                "position": 3,
+                "title": "Alpha",
+                "platform": "youtube",
+                "status": "queued",
+            },
+        ]
+    )
+
+    page.apply_filters(platform="youtube")
+    page.apply_sort(
+        sort_by="title",
+        descending=False,
+    )
+
+    assert page.queue_table.rowCount() == 2
+
+    assert [
+        page.queue_table.item(row, 0).data(
+            Qt.ItemDataRole.UserRole
+        )
+        for row in range(page.queue_table.rowCount())
+    ] == [3, 1]
+
+    assert [
+        item["id"]
+        for item in page._queue_items
+    ] == [1, 2, 3]
+
+
+
+def test_queue_card_copy_link_writes_url_to_clipboard(
+    monkeypatch,
+):
+    app = QApplication.instance() or QApplication([])
+
+    card = QueueCard(
+        {
+            "id": 1,
+            "title": "Example Video",
+            "status": "queued",
+            "url": "https://youtu.be/example",
+        },
+        lambda: None,
+    )
+
+    class FakeMenu:
+        def __init__(self, parent):
+            self.action = object()
+
+        def addAction(self, text):
+            assert text == "Copy Link"
+            return self.action
+
+        def exec(self, position):
+            return self.action
+
+    monkeypatch.setattr(
+        queue_page_module,
+        "QMenu",
+        FakeMenu,
+    )
+
+    clipboard = QApplication.clipboard()
+    clipboard.clear()
+
+    card._show_url_context_menu(
+        card.url_label.rect().center(),
+        "https://youtu.be/example",
+    )
+
+    assert clipboard.text() == "https://youtu.be/example"

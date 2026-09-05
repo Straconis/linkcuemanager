@@ -1,12 +1,15 @@
 ﻿from collections.abc import Callable
 from urllib.parse import urlsplit
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -14,6 +17,38 @@ from PySide6.QtWidgets import (
 
 
 class BotPage(QWidget):
+    def _show_public_link_context_menu(
+        self,
+        label: QLabel,
+        position,
+    ) -> None:
+        href = label.text()
+
+        start = href.find('href="')
+        if start == -1:
+            return
+
+        start += len('href="')
+        end = href.find('"', start)
+
+        if end == -1:
+            return
+
+        url = href[start:end]
+
+        if not url:
+            return
+
+        menu = QMenu(label)
+        copy_action = menu.addAction("Copy Link")
+
+        selected_action = menu.exec(
+            label.mapToGlobal(position)
+        )
+
+        if selected_action is copy_action:
+            QApplication.clipboard().setText(url)
+
     def __init__(
         self,
         base_url: str,
@@ -320,14 +355,53 @@ class BotPage(QWidget):
         self.live_queue_link.setTextInteractionFlags(
             self.live_queue_link.textInteractionFlags()
         )
+        self.live_queue_link.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.live_queue_link.customContextMenuRequested.connect(
+            lambda position:
+            self._show_public_link_context_menu(
+                self.live_queue_link,
+                position,
+            )
+        )
         public_web_links_layout.addWidget(
             self.live_queue_link
+        )
+
+        self.history_link = QLabel()
+        self.history_link.setOpenExternalLinks(True)
+        self.history_link.setTextInteractionFlags(
+            self.history_link.textInteractionFlags()
+        )
+        self.history_link.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.history_link.customContextMenuRequested.connect(
+            lambda position:
+            self._show_public_link_context_menu(
+                self.history_link,
+                position,
+            )
+        )
+        public_web_links_layout.addWidget(
+            self.history_link
         )
 
         self.help_link = QLabel()
         self.help_link.setOpenExternalLinks(True)
         self.help_link.setTextInteractionFlags(
             self.help_link.textInteractionFlags()
+        )
+        self.help_link.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.help_link.customContextMenuRequested.connect(
+            lambda position:
+            self._show_public_link_context_menu(
+                self.help_link,
+                position,
+            )
         )
         public_web_links_layout.addWidget(
             self.help_link
@@ -337,6 +411,16 @@ class BotPage(QWidget):
         self.architecture_link.setOpenExternalLinks(True)
         self.architecture_link.setTextInteractionFlags(
             self.architecture_link.textInteractionFlags()
+        )
+        self.architecture_link.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.architecture_link.customContextMenuRequested.connect(
+            lambda position:
+            self._show_public_link_context_menu(
+                self.architecture_link,
+                position,
+            )
         )
         public_web_links_layout.addWidget(
             self.architecture_link
@@ -638,6 +722,7 @@ class BotPage(QWidget):
 
         if not host:
             self.live_queue_link.clear()
+            self.history_link.clear()
             self.help_link.clear()
             self.architecture_link.clear()
             return
@@ -647,21 +732,27 @@ class BotPage(QWidget):
         else:
             if port is None:
                 self.live_queue_link.clear()
+                self.history_link.clear()
                 self.help_link.clear()
                 self.architecture_link.clear()
                 return
 
             base_url = f"{host}:{port}"
 
-        live_url = f"{base_url}/live"
+        live_url = f"{base_url}/queue"
+        history_url = f"{base_url}/history"
         help_url = f"{base_url}/help"
         architecture_url = (
             f"{base_url}/help/architecture"
         )
 
         self.live_queue_link.setText(
-            f'Live Queue: '
+            f'Queue: '
             f'<a href="{live_url}">{live_url}</a>'
+        )
+        self.history_link.setText(
+            f'History: '
+            f'<a href="{history_url}">{history_url}</a>'
         )
         self.help_link.setText(
             f'Help: '
