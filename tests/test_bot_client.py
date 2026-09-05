@@ -39,7 +39,7 @@ def test_health():
 
 def test_queue():
     def handler(request):
-        assert request.url.path == "/queue"
+        assert request.url.path == "/api/queue"
 
         return httpx.Response(
             200,

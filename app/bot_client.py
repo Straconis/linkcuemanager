@@ -120,7 +120,7 @@ class BotClient:
         return result
 
     def queue(self) -> list[dict]:
-        result = self._request("GET", "/queue")
+        result = self._request("GET", "/api/queue")
 
         if not isinstance(result, list):
             raise BotClientError(
