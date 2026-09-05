@@ -16,8 +16,6 @@ def disable_startup_timer(monkeypatch):
     )
 
 
-
-
 def test_window_identity(qtbot, monkeypatch):
     monkeypatch.delenv("LINKCUE_BOT_URL", raising=False)
 
@@ -577,7 +575,7 @@ def test_window_schedules_initial_player_refresh(qtbot, monkeypatch):
     window = ManagerWindow()
     qtbot.addWidget(window)
 
-    assert len(scheduled) == 4
+    assert len(scheduled) == 5
 
     assert scheduled[0][0] == 0
     assert scheduled[0][1].__self__ is window
@@ -595,6 +593,20 @@ def test_window_schedules_initial_player_refresh(qtbot, monkeypatch):
     assert (
         scheduled[2][1].__func__
         is ManagerWindow.refresh_public_web_setting
+    )
+
+    assert scheduled[3][0] == 0
+    assert scheduled[3][1].__self__ is window
+    assert (
+        scheduled[3][1].__func__
+        is ManagerWindow.refresh_logging_setting
+    )
+
+    assert scheduled[4][0] == 0
+    assert scheduled[4][1].__self__ is window
+    assert (
+        scheduled[4][1].__func__
+        is ManagerWindow.refresh_twitch_setting
     )
 
 
@@ -1819,167 +1831,313 @@ def test_queue_changed_does_not_replace_history(
     assert window.queue_page.view_mode == "history"
     assert window.queue_page._queue_items == history_items
 
-def test_save_streamer_settings_splits_shared_and_manager_settings(
+def test_streamer_name_loads_from_manager_settings(
+    qtbot,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        "app.window.load_manager_settings",
+        lambda: {
+            "streamer_name": "PapaSmoke",
+            "populate_streamer_name_from_url": False,
+        },
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    assert (
+        window.streamer_page.streamer_name()
+        == "PapaSmoke"
+    )
+    assert (
+        window.streamer_page
+        .populate_streamer_name_from_url_enabled()
+        is False
+    )
+
+
+def test_save_streamer_name_is_manager_local(
     qtbot,
     monkeypatch,
 ):
     window = ManagerWindow()
     qtbot.addWidget(window)
 
-    shared_settings = {
-        "bot_url": "http://example.test",
-    }
-    manager_settings = {
-        "manager_username": "Steve",
-        "dark_mode": True,
-    }
-
-    saved_shared = []
     saved_manager = []
+    saved_shared = []
 
-    monkeypatch.setattr(
-        "app.window.load_shared_settings",
-        lambda: dict(shared_settings),
-    )
-    monkeypatch.setattr(
-        "app.window.save_shared_settings",
-        lambda settings: saved_shared.append(dict(settings)),
-    )
     monkeypatch.setattr(
         "app.window.load_manager_settings",
-        lambda: dict(manager_settings),
+        lambda: {},
     )
     monkeypatch.setattr(
         "app.window.save_manager_settings",
-        lambda settings: saved_manager.append(dict(settings)),
+        lambda settings: saved_manager.append(
+            dict(settings)
+        ),
+    )
+    monkeypatch.setattr(
+        "app.window.load_shared_settings",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        "app.window.save_shared_settings",
+        lambda settings: saved_shared.append(
+            dict(settings)
+        ),
     )
 
+    window.streamer_page.populate_streamer_name_from_url_toggle.setChecked(
+        False
+    )
     window.streamer_page.streamer_name_input.setText(
-        "smokeeeg"
-    )
-    window.streamer_page.twitch_url_input.setText(
-        "https://twitch.tv/smokeeeg"
-    )
-    window.streamer_page.populate_from_twitch_toggle.setChecked(
-        True
+        "PapaSmoke"
     )
 
     window.save_streamer_settings()
 
-    assert saved_shared == [
-        {
-            "bot_url": "http://example.test",
-            "streamer_name": "smokeeeg",
-            "streamer_twitch_url": (
-                "https://twitch.tv/smokeeeg"
-            ),
-        }
-    ]
+    assert saved_manager[-1]["streamer_name"] == "PapaSmoke"
+    assert (
+        saved_manager[-1][
+            "populate_streamer_name_from_url"
+        ]
+        is False
+    )
 
-    assert saved_manager == [
-        {
-            "manager_username": "Steve",
-            "dark_mode": True,
-            "populate_from_twitch_url": True,
-        }
-    ]
+    assert all(
+        "streamer_name" not in settings
+        for settings in saved_shared
+    )
 
 
-def test_window_loads_streamer_identity_from_shared_settings(
+def test_refresh_twitch_setting_derives_streamer_name_when_enabled(
     qtbot,
-    monkeypatch,
 ):
-    monkeypatch.setattr(
-        "app.window.load_shared_settings",
-        lambda: {
-            "streamer_name": "smokeeeg",
-            "streamer_twitch_url": (
-                "https://twitch.tv/smokeeeg"
-            ),
-        },
-    )
-
-    monkeypatch.setattr(
-        "app.window.load_manager_settings",
-        lambda: {
-            "populate_from_twitch_url": True,
-        },
-    )
-
     window = ManagerWindow()
     qtbot.addWidget(window)
-
-    assert (
-        window.streamer_page.streamer_name()
-        == "smokeeeg"
-    )
-
-    assert (
-        window.streamer_page.twitch_url()
-        == "https://twitch.tv/smokeeeg"
-    )
 
     assert (
         window.streamer_page
-        .populate_from_twitch_enabled()
+        .populate_streamer_name_from_url_enabled()
         is True
     )
 
+    class FakeClient:
+        def twitch_setting(self):
+            return {
+                "channel_url": (
+                    "https://twitch.tv/smokeeeg"
+                ),
+                "channel": "specialchannel",
+                "populate_channel_from_url": False,
+            }
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.refresh_twitch_setting()
+
+    assert window.streamer_page.streamer_name() == "smokeeeg"
     assert (
-        window.twitch_page.entered_channel()
-        == "smokeeeg"
+        window.streamer_page.channel_url()
+        == "https://twitch.tv/smokeeeg"
+    )
+    assert (
+        window.streamer_page.configured_channel()
+        == "specialchannel"
+    )
+    assert (
+        window.streamer_page
+        .populate_channel_from_url_enabled()
+        is False
     )
 
 
-def test_window_migrates_legacy_streamer_identity_to_shared_settings(
+def test_refresh_twitch_setting_preserves_manual_streamer_name_when_disabled(
+    qtbot,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    window.streamer_page.populate_streamer_name_from_url_toggle.setChecked(
+        False
+    )
+    window.streamer_page.set_streamer_name("Boomer")
+
+    class FakeClient:
+        def twitch_setting(self):
+            return {
+                "channel_url": (
+                    "https://twitch.tv/smokeeeg"
+                ),
+                "channel": "specialchannel",
+                "populate_channel_from_url": False,
+            }
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.refresh_twitch_setting()
+
+    assert window.streamer_page.streamer_name() == "Boomer"
+    assert (
+        window.streamer_page.channel_url()
+        == "https://twitch.tv/smokeeeg"
+    )
+    assert (
+        window.streamer_page.configured_channel()
+        == "specialchannel"
+    )
+
+
+def test_save_streamer_settings_sends_bot_owned_configuration(
     qtbot,
     monkeypatch,
 ):
-    shared_settings = {}
+    window = ManagerWindow()
+    qtbot.addWidget(window)
 
-    manager_settings = {
-        "streamer_name": "smokeeeg",
-        "streamer_twitch_url": (
-            "https://twitch.tv/smokeeeg"
-        ),
-        "populate_from_twitch_url": True,
-    }
-
-    saved_shared = []
-
-    monkeypatch.setattr(
-        "app.window.load_shared_settings",
-        lambda: dict(shared_settings),
-    )
+    calls = []
+    saved_manager_settings = []
 
     monkeypatch.setattr(
         "app.window.load_manager_settings",
-        lambda: dict(manager_settings),
+        lambda: {},
     )
+    monkeypatch.setattr(
+        "app.window.save_manager_settings",
+        lambda settings: saved_manager_settings.append(
+            dict(settings)
+        ),
+    )
+
+    class FakeClient:
+        def set_twitch_setting(
+            self,
+            channel_url,
+            channel,
+            populate_channel_from_url,
+        ):
+            calls.append(
+                (
+                    channel_url,
+                    channel,
+                    populate_channel_from_url,
+                )
+            )
+
+            return {
+                "channel_url": channel_url,
+                "channel": channel,
+                "populate_channel_from_url": (
+                    populate_channel_from_url
+                ),
+            }
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.streamer_page.load_settings(
+        "Boomer",
+        "https://twitch.tv/smokeeeg",
+        "specialchannel",
+        False,
+        False,
+    )
+
+    window.save_streamer_settings()
+
+    assert saved_manager_settings == [
+        {
+            "streamer_name": "Boomer",
+            "populate_streamer_name_from_url": False,
+        }
+    ]
+
+    assert calls == [
+        (
+            "https://twitch.tv/smokeeeg",
+            "specialchannel",
+            False,
+        )
+    ]
+
+
+def test_save_streamer_settings_auto_mode_sends_derived_channel(
+    qtbot,
+    monkeypatch,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    calls = []
 
     monkeypatch.setattr(
-        "app.window.save_shared_settings",
-        lambda settings: saved_shared.append(dict(settings)),
+        "app.window.load_manager_settings",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        "app.window.save_manager_settings",
+        lambda settings: None,
     )
 
+    class FakeClient:
+        def set_twitch_setting(
+            self,
+            channel_url,
+            channel,
+            populate_channel_from_url,
+        ):
+            calls.append(
+                (
+                    channel_url,
+                    channel,
+                    populate_channel_from_url,
+                )
+            )
+
+            return {
+                "channel_url": channel_url,
+                "channel": channel,
+                "populate_channel_from_url": (
+                    populate_channel_from_url
+                ),
+            }
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.streamer_page.load_settings(
+        "Boomer",
+        "https://twitch.tv/SmokeEEG",
+        "differentchannel",
+        True,
+        True,
+    )
+
+    window.save_streamer_settings()
+
+    assert calls == [
+        (
+            "https://twitch.tv/SmokeEEG",
+            "smokeeeg",
+            True,
+        )
+    ]
+
+
+def test_streamer_save_button_is_available(
+    qtbot,
+):
     window = ManagerWindow()
     qtbot.addWidget(window)
 
     assert (
-        window.streamer_page.streamer_name()
-        == "smokeeeg"
+        window.streamer_page.save_settings_button.text()
+        == "Save Settings"
     )
-
-    assert (
-        window.streamer_page.twitch_url()
-        == "https://twitch.tv/smokeeeg"
-    )
-
-    assert saved_shared == [
-        {
-            "streamer_name": "smokeeeg",
-            "streamer_twitch_url": (
-                "https://twitch.tv/smokeeeg"
-            ),
-        }
-    ]

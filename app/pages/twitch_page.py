@@ -24,6 +24,7 @@ class TwitchPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 12)
+        layout.setSpacing(10)
 
         group = QGroupBox("Twitch Channels")
         group_layout = QVBoxLayout(group)
@@ -115,4 +116,3 @@ class TwitchPage(QWidget):
             )
         else:
             self.status_label.setText("Inactive")
-

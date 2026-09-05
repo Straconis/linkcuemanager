@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from urllib.parse import urlsplit
 
 from PySide6.QtWidgets import (
     QGroupBox,
@@ -30,19 +31,16 @@ class StreamerPage(QWidget):
         layout.addWidget(title)
 
         description = QLabel(
-            "Streamer-specific settings used by LinkCue integrations."
+            "Streamer identity and Twitch channel settings."
         )
         description.setObjectName("pageDescription")
         layout.addWidget(description)
 
-        twitch_group = QGroupBox("Twitch")
-        twitch_layout = QVBoxLayout(twitch_group)
+        streamer_group = QGroupBox("Streamer")
+        streamer_layout = QVBoxLayout(streamer_group)
 
-        identity_row = QHBoxLayout()
-
-        identity_row.addWidget(
-            QLabel("Streamer Name:")
-        )
+        name_row = QHBoxLayout()
+        name_row.addWidget(QLabel("Streamer Name:"))
 
         self.streamer_name_input = QLineEdit()
         self.streamer_name_input.setObjectName(
@@ -51,72 +49,98 @@ class StreamerPage(QWidget):
         self.streamer_name_input.setPlaceholderText(
             "Streamer Name"
         )
-        self.streamer_name_input.setMaximumWidth(220)
 
-        identity_row.addWidget(
-            self.streamer_name_input
-        )
-
-        identity_row.addSpacing(18)
-
-        identity_row.addWidget(
-            QLabel("Twitch URL:")
-        )
-
-        self.twitch_url_input = QLineEdit()
-        self.twitch_url_input.setObjectName(
-            "streamerTwitchUrlInput"
-        )
-        self.twitch_url_input.setPlaceholderText(
-            "https://www.twitch.tv/channel"
-        )
-        self.twitch_url_input.setMaximumWidth(420)
-
-        identity_row.addWidget(
-            self.twitch_url_input,
+        name_row.addWidget(
+            self.streamer_name_input,
             1,
         )
-        identity_row.addStretch()
+        streamer_layout.addLayout(name_row)
 
-        twitch_layout.addLayout(identity_row)
+        populate_name_row = QHBoxLayout()
+        populate_name_row.addWidget(
+            QLabel(
+                "Populate Streamer Name from "
+                "Twitch Channel URL:"
+            )
+        )
+
+        self.populate_streamer_name_from_url_toggle = (
+            ToggleSwitch()
+        )
+        self.populate_streamer_name_from_url_toggle.setObjectName(
+            "populateStreamerNameFromUrlToggle"
+        )
+        self.populate_streamer_name_from_url_toggle.setAccessibleName(
+            "Populate Streamer Name from Twitch Channel URL"
+        )
+        self.populate_streamer_name_from_url_toggle.setChecked(True)
+
+        populate_name_row.addWidget(
+            self.populate_streamer_name_from_url_toggle
+        )
+        populate_name_row.addStretch()
+
+        streamer_layout.addLayout(populate_name_row)
+
+        url_row = QHBoxLayout()
+        url_row.addWidget(QLabel("Twitch Channel URL:"))
+
+        self.channel_url_input = QLineEdit()
+        self.channel_url_input.setObjectName(
+            "twitchChannelUrlInput"
+        )
+        self.channel_url_input.setPlaceholderText(
+            "https://www.twitch.tv/channel"
+        )
+
+        url_row.addWidget(
+            self.channel_url_input,
+            1,
+        )
+        streamer_layout.addLayout(url_row)
+
+        channel_row = QHBoxLayout()
+        channel_row.addWidget(QLabel("Twitch Channel:"))
+
+        self.configured_channel_input = QLineEdit()
+        self.configured_channel_input.setObjectName(
+            "configuredTwitchChannelInput"
+        )
+        self.configured_channel_input.setPlaceholderText(
+            "Twitch channel name"
+        )
+
+        channel_row.addWidget(
+            self.configured_channel_input,
+            1,
+        )
+        streamer_layout.addLayout(channel_row)
 
         populate_row = QHBoxLayout()
+        populate_row.addWidget(
+            QLabel(
+                "Populate Twitch Channel from "
+                "Twitch Channel URL:"
+            )
+        )
+
+        self.populate_channel_from_url_toggle = (
+            ToggleSwitch()
+        )
+        self.populate_channel_from_url_toggle.setObjectName(
+            "populateTwitchChannelFromUrlToggle"
+        )
+        self.populate_channel_from_url_toggle.setAccessibleName(
+            "Populate Twitch Channel from Twitch Channel URL"
+        )
+        self.populate_channel_from_url_toggle.setChecked(True)
 
         populate_row.addWidget(
-            QLabel("Populate Fields from Twitch URL:")
-        )
-
-        self.populate_from_twitch_toggle = ToggleSwitch()
-        self.populate_from_twitch_toggle.setObjectName(
-            "populateFromTwitchToggle"
-        )
-        self.populate_from_twitch_toggle.setAccessibleName(
-            "Populate Fields from Twitch URL"
-        )
-
-        populate_row.addWidget(
-            self.populate_from_twitch_toggle
+            self.populate_channel_from_url_toggle
         )
         populate_row.addStretch()
 
-        twitch_layout.addLayout(populate_row)
-
-        mapping_label = QLabel(
-            "Fields populated from the Twitch URL:"
-        )
-        twitch_layout.addWidget(mapping_label)
-
-        self.twitch_mapping_label = QLabel(
-            "Streamer Name\n"
-            "Twitch Channel"
-        )
-        self.twitch_mapping_label.setObjectName(
-            "twitchMappingLabel"
-        )
-
-        twitch_layout.addWidget(
-            self.twitch_mapping_label
-        )
+        streamer_layout.addLayout(populate_row)
 
         button_row = QHBoxLayout()
         button_row.addStretch()
@@ -134,11 +158,22 @@ class StreamerPage(QWidget):
         button_row.addWidget(
             self.save_settings_button
         )
+        streamer_layout.addLayout(button_row)
 
-        twitch_layout.addLayout(button_row)
-
-        layout.addWidget(twitch_group)
+        layout.addWidget(streamer_group)
         layout.addStretch()
+
+        self.channel_url_input.textChanged.connect(
+            self._channel_url_changed
+        )
+        self.populate_streamer_name_from_url_toggle.toggled.connect(
+            self._populate_streamer_name_setting_changed
+        )
+        self.populate_channel_from_url_toggle.toggled.connect(
+            self._populate_setting_changed
+        )
+
+        self._apply_populate_mode()
 
     def streamer_name(self) -> str:
         return self.streamer_name_input.text().strip()
@@ -151,27 +186,152 @@ class StreamerPage(QWidget):
             streamer_name
         )
 
-    def twitch_url(self) -> str:
-        return self.twitch_url_input.text().strip()
+    def channel_url(self) -> str:
+        return self.channel_url_input.text().strip()
 
-    def populate_from_twitch_enabled(self) -> bool:
-        return self.populate_from_twitch_toggle.isChecked()
+    def configured_channel(self) -> str:
+        return self.configured_channel_input.text().strip()
+
+    def populate_streamer_name_from_url_enabled(self) -> bool:
+        return (
+            self.populate_streamer_name_from_url_toggle.isChecked()
+        )
+
+    def populate_channel_from_url_enabled(self) -> bool:
+        return (
+            self.populate_channel_from_url_toggle.isChecked()
+        )
+
+    @staticmethod
+    def _channel_from_url(channel_url: str) -> str:
+        value = channel_url.strip()
+
+        if not value:
+            return ""
+
+        parse_url = value
+
+        if "://" not in parse_url:
+            parse_url = f"https://{parse_url}"
+
+        parsed = urlsplit(parse_url)
+        host = parsed.netloc.lower()
+
+        if host.startswith("www."):
+            host = host[4:]
+
+        if host != "twitch.tv":
+            return ""
+
+        path_parts = [
+            part
+            for part in parsed.path.split("/")
+            if part
+        ]
+
+        if not path_parts:
+            return ""
+
+        return path_parts[0].strip().lower()
+
+    def _populate_streamer_name(self) -> None:
+        self.streamer_name_input.setText(
+            self._channel_from_url(
+                self.channel_url()
+            )
+        )
+
+    def _populate_configured_channel(self) -> None:
+        self.configured_channel_input.setText(
+            self._channel_from_url(
+                self.channel_url()
+            )
+        )
+
+    def _channel_url_changed(self) -> None:
+        if self.populate_streamer_name_from_url_enabled():
+            self._populate_streamer_name()
+
+        if self.populate_channel_from_url_enabled():
+            self._populate_configured_channel()
+
+    def _populate_streamer_name_setting_changed(self) -> None:
+        self._apply_populate_mode()
+
+        if self.populate_streamer_name_from_url_enabled():
+            self._populate_streamer_name()
+
+    def _populate_setting_changed(self) -> None:
+        self._apply_populate_mode()
+
+        if self.populate_channel_from_url_enabled():
+            self._populate_configured_channel()
+
+    def _apply_populate_mode(self) -> None:
+        self.streamer_name_input.setReadOnly(
+            self.populate_streamer_name_from_url_enabled()
+        )
+        self.configured_channel_input.setReadOnly(
+            self.populate_channel_from_url_enabled()
+        )
 
     def load_settings(
         self,
         streamer_name: str,
-        twitch_url: str,
-        populate_from_twitch: bool,
+        channel_url: str | None,
+        channel: str | None,
+        populate_streamer_name_from_url: bool,
+        populate_channel_from_url: bool,
     ) -> None:
-        self.streamer_name_input.setText(
-            streamer_name
+        self.populate_streamer_name_from_url_toggle.blockSignals(
+            True
         )
-        self.twitch_url_input.setText(
-            twitch_url
+        self.populate_channel_from_url_toggle.blockSignals(
+            True
+        )
+        self.channel_url_input.blockSignals(True)
+
+        self.populate_streamer_name_from_url_toggle.setChecked(
+            populate_streamer_name_from_url
+        )
+        self.populate_channel_from_url_toggle.setChecked(
+            populate_channel_from_url
+        )
+        self.channel_url_input.setText(
+            channel_url or ""
         )
 
-        self.populate_from_twitch_toggle.blockSignals(True)
-        self.populate_from_twitch_toggle.setChecked(
-            populate_from_twitch
+        self.populate_streamer_name_from_url_toggle.blockSignals(
+            False
         )
-        self.populate_from_twitch_toggle.blockSignals(False)
+        self.populate_channel_from_url_toggle.blockSignals(
+            False
+        )
+        self.channel_url_input.blockSignals(False)
+
+        self._apply_populate_mode()
+
+        if populate_streamer_name_from_url:
+            derived_streamer_name = self._channel_from_url(
+                self.channel_url()
+            )
+
+            if derived_streamer_name:
+                self.streamer_name_input.setText(
+                    derived_streamer_name
+                )
+            else:
+                self.streamer_name_input.setText(
+                    streamer_name
+                )
+        else:
+            self.streamer_name_input.setText(
+                streamer_name
+            )
+
+        if populate_channel_from_url:
+            self._populate_configured_channel()
+        else:
+            self.configured_channel_input.setText(
+                channel or ""
+            )

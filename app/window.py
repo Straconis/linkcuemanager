@@ -286,83 +286,43 @@ class ManagerWindow(QMainWindow):
         )
 
         streamer_name = str(
-            self.shared_settings.get(
-                "streamer_name",
-                "",
-            )
-        )
-
-        streamer_twitch_url = str(
-            self.shared_settings.get(
-                "streamer_twitch_url",
-                "",
-            )
-        )
-
-        legacy_streamer_name = str(
             self.manager_settings.get(
                 "streamer_name",
                 "",
             )
         )
 
-        legacy_streamer_twitch_url = str(
+        populate_streamer_name_from_url = bool(
             self.manager_settings.get(
-                "streamer_twitch_url",
-                "",
+                "populate_streamer_name_from_url",
+                True,
             )
         )
 
-        streamer_identity_migrated = False
-
-        if (
-            not streamer_name
-            and legacy_streamer_name
-        ):
-            streamer_name = legacy_streamer_name
-            self.shared_settings["streamer_name"] = (
-                legacy_streamer_name
-            )
-            streamer_identity_migrated = True
-
-        if (
-            not streamer_twitch_url
-            and legacy_streamer_twitch_url
-        ):
-            streamer_twitch_url = (
-                legacy_streamer_twitch_url
-            )
-            self.shared_settings["streamer_twitch_url"] = (
-                legacy_streamer_twitch_url
-            )
-            streamer_identity_migrated = True
-
-        if streamer_identity_migrated:
-            save_shared_settings(
-                self.shared_settings
+        if not streamer_name:
+            legacy_shared_streamer_name = str(
+                self.shared_settings.get(
+                    "streamer_name",
+                    "",
+                )
             )
 
-        populate_from_twitch = bool(
-            self.manager_settings.get(
-                "populate_from_twitch_url",
-                False,
-            )
-        )
+            if legacy_shared_streamer_name:
+                streamer_name = legacy_shared_streamer_name
+                self.manager_settings["streamer_name"] = (
+                    legacy_shared_streamer_name
+                )
+                save_manager_settings(
+                    self.manager_settings
+                )
 
         self.streamer_page.load_settings(
             streamer_name,
-            streamer_twitch_url,
-            populate_from_twitch,
+            None,
+            None,
+            populate_streamer_name_from_url,
+            True,
         )
-
-        if (
-            populate_from_twitch
-            and streamer_name
-        ):
-            self.twitch_page.set_channel(
-                streamer_name
-            )
-
         self.set_dark_mode(
             dark_mode_enabled
         )
@@ -387,6 +347,10 @@ class ManagerWindow(QMainWindow):
         QTimer.singleShot(
             0,
             self.refresh_logging_setting,
+        )
+        QTimer.singleShot(
+            0,
+            self.refresh_twitch_setting,
         )
 
     def _show_page(self, index: int, key: str) -> None:
@@ -1341,84 +1305,16 @@ class ManagerWindow(QMainWindow):
         streamer_name = (
             self.streamer_page.streamer_name()
         )
-        twitch_url = (
-            self.streamer_page.twitch_url()
-        )
-        populate_from_twitch = (
-            self.streamer_page.populate_from_twitch_enabled()
-        )
-
-        if populate_from_twitch:
-            parse_url = twitch_url
-
-            if "://" not in parse_url:
-                parse_url = f"https://{parse_url}"
-
-            parsed = urlsplit(parse_url)
-
-            hostname = (
-                parsed.hostname or ""
-            ).lower()
-
-            valid_hosts = {
-                "twitch.tv",
-                "www.twitch.tv",
-                "m.twitch.tv",
-            }
-
-            path_parts = [
-                part
-                for part in parsed.path.split("/")
-                if part
-            ]
-
-            if (
-                hostname not in valid_hosts
-                or not path_parts
-            ):
-                self.status_label.setText(
-                    "Unable to populate fields: "
-                    "enter a valid Twitch channel URL."
-                )
-                return
-
-            streamer_name = path_parts[0]
-
-            self.streamer_page.set_streamer_name(
-                streamer_name
-            )
-
-            self.twitch_page.set_channel(
-                streamer_name
-            )
-
-        shared_settings = load_shared_settings()
-
-        shared_settings["streamer_name"] = (
-            streamer_name
-        )
-        shared_settings["streamer_twitch_url"] = (
-            twitch_url
-        )
-
-        save_shared_settings(
-            shared_settings
-        )
-
-        self.shared_settings = shared_settings
 
         manager_settings = load_manager_settings()
-
-        manager_settings.pop(
-            "streamer_name",
-            None,
+        manager_settings["streamer_name"] = (
+            streamer_name
         )
-        manager_settings.pop(
-            "streamer_twitch_url",
-            None,
-        )
-        manager_settings["populate_from_twitch_url"] = (
-            populate_from_twitch
+        manager_settings[
+            "populate_streamer_name_from_url"
+        ] = (
+            self.streamer_page
+            .populate_streamer_name_from_url_enabled()
         )
 
         save_manager_settings(
@@ -1427,10 +1323,63 @@ class ManagerWindow(QMainWindow):
 
         self.manager_settings = manager_settings
 
+        self._update_client()
+
+        try:
+            result = self.bot_client.set_twitch_setting(
+                self.streamer_page.channel_url(),
+                self.streamer_page.configured_channel(),
+                self.streamer_page
+                .populate_channel_from_url_enabled(),
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self.streamer_page.load_settings(
+            streamer_name,
+            result.get("channel_url"),
+            result.get("channel"),
+            self.streamer_page
+            .populate_streamer_name_from_url_enabled(),
+            bool(
+                result.get(
+                    "populate_channel_from_url",
+                    True,
+                )
+            ),
+        )
+
         self.status_label.setText(
             "Streamer settings saved."
         )
 
+    def refresh_twitch_setting(self) -> None:
+        self._update_client()
+
+        try:
+            result = self.bot_client.twitch_setting()
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self.streamer_page.load_settings(
+            self.streamer_page.streamer_name(),
+            result.get("channel_url"),
+            result.get("channel"),
+            self.streamer_page
+            .populate_streamer_name_from_url_enabled(),
+            bool(
+                result.get(
+                    "populate_channel_from_url",
+                    True,
+                )
+            ),
+        )
+
+        self.status_label.setText(
+            "Streamer Twitch settings refreshed."
+        )
     def refresh_twitch_status(self) -> None:
         self._update_client()
 

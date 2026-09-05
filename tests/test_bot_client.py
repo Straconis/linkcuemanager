@@ -1,4 +1,5 @@
-﻿import httpx
+import json
+import httpx
 import pytest
 
 from app.bot_client import BotClient, BotClientError
@@ -374,4 +375,62 @@ def test_restart_bot_posts_to_maintenance_restart():
     }
     assert result == {
         "status": "restart_requested"
+    }
+
+
+def test_twitch_setting():
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.path == "/settings/twitch"
+
+        return httpx.Response(
+            200,
+            json={
+                "channel_url": "https://twitch.tv/smokeeeg",
+                "channel": "smokeeeg",
+                "populate_channel_from_url": True,
+            },
+        )
+
+    client = make_client(handler)
+
+    assert client.twitch_setting() == {
+        "channel_url": "https://twitch.tv/smokeeeg",
+        "channel": "smokeeeg",
+        "populate_channel_from_url": True,
+    }
+
+
+def test_set_twitch_setting():
+    def handler(request):
+        assert request.method == "PUT"
+        assert request.url.path == "/settings/twitch"
+
+        assert json.loads(request.content) == {
+            "channel_url": "https://twitch.tv/smokeeeg",
+            "channel": "specialchannel",
+            "populate_channel_from_url": False,
+        }
+
+        return httpx.Response(
+            200,
+            json={
+                "channel_url": "https://twitch.tv/smokeeeg",
+                "channel": "specialchannel",
+                "populate_channel_from_url": False,
+            },
+        )
+
+    client = make_client(handler)
+
+    result = client.set_twitch_setting(
+        "https://twitch.tv/smokeeeg",
+        "specialchannel",
+        False,
+    )
+
+    assert result == {
+        "channel_url": "https://twitch.tv/smokeeeg",
+        "channel": "specialchannel",
+        "populate_channel_from_url": False,
     }

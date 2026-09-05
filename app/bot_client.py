@@ -322,6 +322,44 @@ class BotClient:
     def player_state(self) -> dict:
         return self._request("GET", "/player/state")
 
+    def twitch_setting(self) -> dict:
+        result = self._request(
+            "GET",
+            "/settings/twitch",
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid Twitch setting"
+            )
+
+        return result
+
+    def set_twitch_setting(
+        self,
+        channel_url: str,
+        channel: str,
+        populate_channel_from_url: bool,
+    ) -> dict:
+        result = self._request(
+            "PUT",
+            "/settings/twitch",
+            json_body={
+                "channel_url": channel_url,
+                "channel": channel,
+                "populate_channel_from_url": (
+                    populate_channel_from_url
+                ),
+            },
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid Twitch setting"
+            )
+
+        return result
+
     def twitch_status(self) -> dict:
         return self._request("GET", "/twitch/status")
 
