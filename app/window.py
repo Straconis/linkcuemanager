@@ -1,7 +1,8 @@
 import csv
 import os
 from urllib.parse import urlsplit
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import QTimer, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from datetime import datetime
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -204,6 +205,9 @@ class ManagerWindow(QMainWindow):
         )
 
         self.twitch_page = TwitchPage(
+            self.authorize_twitch,
+            self.connect_twitch,
+            self.disconnect_twitch,
             self.join_channel,
             self.leave_channel,
             self.refresh_twitch_status,
@@ -1380,6 +1384,62 @@ class ManagerWindow(QMainWindow):
         self.status_label.setText(
             "Streamer Twitch settings refreshed."
         )
+    def authorize_twitch(self) -> None:
+        self._update_client()
+
+        try:
+            result = self.bot_client.authorize_twitch()
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        authorization_url = str(
+            result.get("authorization_url", "")
+        ).strip()
+
+        if not authorization_url:
+            self.status_label.setText(
+                "Bot did not provide a Twitch authorization URL."
+            )
+            return
+
+        opened = QDesktopServices.openUrl(
+            QUrl(authorization_url)
+        )
+
+        if not opened:
+            self.status_label.setText(
+                "Could not open Twitch authorization in the browser."
+            )
+            return
+
+        self.status_label.setText(
+            "Twitch authorization opened in your browser. "
+            "Complete authorization, then click Refresh."
+        )
+
+    def connect_twitch(self) -> None:
+        self._update_client()
+
+        try:
+            result = self.bot_client.connect_twitch()
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self._apply_twitch_result(result)
+
+    def disconnect_twitch(self) -> None:
+        self._update_client()
+
+        try:
+            result = self.bot_client.disconnect_twitch()
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self._apply_twitch_result(result)
+
     def refresh_twitch_status(self) -> None:
         self._update_client()
 

@@ -3,11 +3,17 @@ from app.pages.twitch_page import TwitchPage
 
 def _build_page(
     qtbot,
+    authorize_callback=lambda: None,
+    connect_callback=lambda: None,
+    disconnect_callback=lambda: None,
     join_callback=lambda: None,
     leave_callback=lambda: None,
     refresh_callback=lambda: None,
 ):
     page = TwitchPage(
+        authorize_callback,
+        connect_callback,
+        disconnect_callback,
         join_callback,
         leave_callback,
         refresh_callback,
@@ -19,6 +25,11 @@ def _build_page(
 def test_runtime_controls_are_available(qtbot):
     page = _build_page(qtbot)
 
+    assert hasattr(page, "authorization_label")
+    assert hasattr(page, "connection_label")
+    assert hasattr(page, "authorize_button")
+    assert hasattr(page, "connect_button")
+    assert hasattr(page, "disconnect_button")
     assert hasattr(page, "channel_input")
     assert hasattr(page, "join_button")
     assert hasattr(page, "leave_button")
@@ -117,17 +128,99 @@ def test_runtime_buttons_call_callbacks(qtbot):
 
     page = _build_page(
         qtbot,
+        authorize_callback=lambda: calls.append("authorize"),
+        connect_callback=lambda: calls.append("connect"),
+        disconnect_callback=lambda: calls.append("disconnect"),
         join_callback=lambda: calls.append("join"),
         leave_callback=lambda: calls.append("leave"),
         refresh_callback=lambda: calls.append("refresh"),
     )
 
+    page.authorize_button.click()
+    page.connect_button.click()
+    page.disconnect_button.click()
     page.join_button.click()
     page.leave_button.click()
     page.refresh_button.click()
 
     assert calls == [
+        "authorize",
+        "connect",
+        "disconnect",
         "join",
         "leave",
         "refresh",
     ]
+
+
+def test_authorization_status_shows_authorized_login(qtbot):
+    page = _build_page(qtbot)
+
+    page.apply_auth_status(
+        {
+            "authorized": True,
+            "login": "linkcuebot",
+        }
+    )
+
+    assert page.authorization_label.text() == (
+        "Authorization: Authorized as linkcuebot"
+    )
+
+
+def test_authorization_status_shows_not_authorized(qtbot):
+    page = _build_page(qtbot)
+
+    page.apply_auth_status(
+        {
+            "authorized": False,
+            "login": None,
+        }
+    )
+
+    assert page.authorization_label.text() == (
+        "Authorization: Not Authorized"
+    )
+
+
+def test_runtime_status_updates_connection_and_authorization(qtbot):
+    page = _build_page(qtbot)
+
+    page.apply_status(
+        {
+            "authorized": True,
+            "login": "linkcuebot",
+            "connected": True,
+            "channels": ["smokeeeg"],
+        },
+        use_connected_flag=True,
+    )
+
+    assert page.authorization_label.text() == (
+        "Authorization: Authorized as linkcuebot"
+    )
+    assert page.connection_label.text() == (
+        "Connection: Connected"
+    )
+    assert page.status_label.text() == (
+        "Active - 1 channel(s)"
+    )
+
+
+def test_runtime_status_shows_disconnected(qtbot):
+    page = _build_page(qtbot)
+
+    page.apply_status(
+        {
+            "authorized": True,
+            "login": "linkcuebot",
+            "connected": False,
+            "channels": [],
+        },
+        use_connected_flag=True,
+    )
+
+    assert page.connection_label.text() == (
+        "Connection: Disconnected"
+    )
+    assert page.status_label.text() == "Inactive"

@@ -360,8 +360,32 @@ class BotClient:
 
         return result
 
+    def twitch_auth_status(self) -> dict:
+        return self._request(
+            "GET",
+            "/twitch/auth/status",
+        )
+
+    def authorize_twitch(self) -> dict:
+        return self._request(
+            "POST",
+            "/twitch/auth/authorize",
+        )
+
     def twitch_status(self) -> dict:
         return self._request("GET", "/twitch/status")
+
+    def connect_twitch(self) -> dict:
+        return self._request(
+            "POST",
+            "/twitch/connect",
+        )
+
+    def disconnect_twitch(self) -> dict:
+        return self._request(
+            "POST",
+            "/twitch/disconnect",
+        )
 
     def join_twitch_channel(self, channel: str) -> dict:
         encoded = quote(channel, safe="")
