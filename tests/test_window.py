@@ -2313,3 +2313,379 @@ def test_bot_restart_failure_reenables_button(qtbot):
             "Bot-Hosting returned HTTP 504."
         )
     )
+
+
+def test_pair_manager_saves_identity_password_and_host_control(
+    qtbot,
+    monkeypatch,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+
+    events = []
+
+    class FakeIdentityStore:
+        def save_identity(self, identity):
+            events.append(
+                (
+                    "identity",
+                    identity.client_id,
+                    identity.role,
+                    identity.secret,
+                )
+            )
+
+    class FakeBotClient:
+        def __init__(self):
+            self.identity_store = FakeIdentityStore()
+
+        def create_manager_pairing(self, control_password):
+            assert control_password == "shared-password"
+            return {
+                "code": "123456",
+                "role": "manager",
+                "expires_at": "future",
+            }
+
+        def pair_manager(self, code, control_password):
+            assert code == "123456"
+            assert control_password == "shared-password"
+            return {
+                "client_id": "manager-example",
+                "role": "manager",
+                "secret": "ab" * 32,
+            }
+
+        def host_control_provisioning(self):
+            assert events
+            assert events[0][0] == "identity"
+            events.append(("provision",))
+            return {
+                "bot_hosting_api_key": "host-secret",
+            }
+
+    class FakeControlPasswordStore:
+        def save_password(self, password):
+            events.append(
+                ("password", password)
+            )
+
+        def get_password(self):
+            return None
+
+    class FakeHostingStore:
+        def save_api_key(self, api_key):
+            events.append(
+                ("host-key", api_key)
+            )
+
+        def get_api_key(self):
+            return "host-secret"
+
+    window.bot_client = FakeBotClient()
+    window.control_network_credentials = (
+        FakeControlPasswordStore()
+    )
+    window.bot_hosting_credentials = FakeHostingStore()
+
+    window.bot_page.control_password_input.setText(
+        "shared-password"
+    )
+
+    window.pair_manager()
+
+    assert events == [
+        (
+            "identity",
+            "manager-example",
+            "manager",
+            "ab" * 32,
+        ),
+        (
+            "password",
+            "shared-password",
+        ),
+        ("provision",),
+        ("host-key", "host-secret"),
+    ]
+    assert (
+        window.bot_page.pairing_status_label.text()
+        == "Paired as manager-example"
+    )
+    assert (
+        window.status_label.text()
+        == "Manager paired and host control synchronized."
+    )
+
+
+def test_pair_manager_rejects_invalid_identity_before_saving(
+    qtbot,
+    monkeypatch,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+
+    saved = []
+
+    class FakeIdentityStore:
+        def save_identity(self, identity):
+            saved.append(identity)
+
+    class FakeBotClient:
+        def __init__(self):
+            self.identity_store = FakeIdentityStore()
+
+        def create_manager_pairing(self, control_password):
+            return {
+                "code": "123456",
+                "role": "manager",
+                "expires_at": "future",
+            }
+
+        def pair_manager(self, code, control_password):
+            return {
+                "client_id": "player-example",
+                "role": "player",
+                "secret": "ab" * 32,
+            }
+
+    window.bot_client = FakeBotClient()
+
+    window.bot_page.control_password_input.setText(
+        "shared-password"
+    )
+
+    window.pair_manager()
+
+    assert saved == []
+    assert (
+        window.status_label.text()
+        == "Bot returned an invalid Manager identity."
+    )
+
+
+def test_pair_manager_keeps_pairing_when_host_provisioning_fails(
+    qtbot,
+    monkeypatch,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+
+    saved_identities = []
+    saved_passwords = []
+    saved_host_keys = []
+
+    class FakeIdentityStore:
+        def save_identity(self, identity):
+            saved_identities.append(identity)
+
+    class FakeBotClient:
+        def __init__(self):
+            self.identity_store = FakeIdentityStore()
+
+        def create_manager_pairing(self, control_password):
+            return {
+                "code": "123456",
+                "role": "manager",
+                "expires_at": "future",
+            }
+
+        def pair_manager(self, code, control_password):
+            return {
+                "client_id": "manager-example",
+                "role": "manager",
+                "secret": "ab" * 32,
+            }
+
+        def host_control_provisioning(self):
+            raise BotClientError(
+                "Host control unavailable"
+            )
+
+    class FakeControlPasswordStore:
+        def save_password(self, password):
+            saved_passwords.append(password)
+
+        def get_password(self):
+            return None
+
+    class FakeHostingStore:
+        def save_api_key(self, api_key):
+            saved_host_keys.append(api_key)
+
+        def get_api_key(self):
+            return None
+
+    window.bot_client = FakeBotClient()
+    window.control_network_credentials = (
+        FakeControlPasswordStore()
+    )
+    window.bot_hosting_credentials = FakeHostingStore()
+
+    window.bot_page.control_password_input.setText(
+        "shared-password"
+    )
+
+    window.pair_manager()
+
+    assert len(saved_identities) == 1
+    assert saved_identities[0].client_id == "manager-example"
+    assert saved_identities[0].role == "manager"
+    assert saved_passwords == ["shared-password"]
+    assert saved_host_keys == []
+    assert (
+        window.bot_page.pairing_status_label.text()
+        == "Paired as manager-example"
+    )
+    assert (
+        window.status_label.text()
+        == (
+            "Manager paired successfully, but host control "
+            "synchronization failed: Host control unavailable"
+        )
+    )
+
+
+def test_pair_manager_uses_remembered_control_password(
+    qtbot,
+    monkeypatch,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+
+    used_passwords = []
+
+    class FakeIdentityStore:
+        def save_identity(self, identity):
+            pass
+
+    class FakeBotClient:
+        def __init__(self):
+            self.identity_store = FakeIdentityStore()
+
+        def create_manager_pairing(self, control_password):
+            used_passwords.append(control_password)
+            return {
+                "code": "123456",
+                "role": "manager",
+                "expires_at": "future",
+            }
+
+        def pair_manager(self, code, control_password):
+            used_passwords.append(control_password)
+            return {
+                "client_id": "manager-remembered",
+                "role": "manager",
+                "secret": "ab" * 32,
+            }
+
+        def host_control_provisioning(self):
+            return {
+                "bot_hosting_api_key": "host-secret",
+            }
+
+    class FakeControlPasswordStore:
+        def get_password(self):
+            return "remembered-password"
+
+        def save_password(self, password):
+            assert password == "remembered-password"
+
+    class FakeHostingStore:
+        def save_api_key(self, api_key):
+            assert api_key == "host-secret"
+
+        def get_api_key(self):
+            return "host-secret"
+
+    window.bot_client = FakeBotClient()
+    window.control_network_credentials = (
+        FakeControlPasswordStore()
+    )
+    window.bot_hosting_credentials = FakeHostingStore()
+
+    window.bot_page.control_password_input.clear()
+
+    window.pair_manager()
+
+    assert used_passwords == [
+        "remembered-password",
+        "remembered-password",
+    ]
+    assert (
+        window.bot_page.pairing_status_label.text()
+        == "Paired as manager-remembered"
+    )
+
+
+def test_window_loads_existing_manager_pairing_state(
+    qtbot,
+    monkeypatch,
+):
+    class FakeIdentity:
+        client_id = "manager-existing"
+        role = "manager"
+        secret = "ab" * 32
+
+    class FakeIdentityStore:
+        def load_identity(self):
+            return FakeIdentity()
+
+    class FakeBotClient:
+        def __init__(
+            self,
+            base_url,
+            timeout=10.0,
+            transport=None,
+        ):
+            self.base_url = base_url.rstrip("/")
+            self.identity_store = FakeIdentityStore()
+
+    class FakeControlPasswordStore:
+        def get_password(self):
+            return "remembered-password"
+
+    monkeypatch.setattr(
+        "app.window.BotClient",
+        FakeBotClient,
+    )
+    monkeypatch.setattr(
+        "app.window.ControlNetworkCredentialStore",
+        FakeControlPasswordStore,
+    )
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    assert (
+        window.bot_page.pairing_status_label.text()
+        == "Paired as manager-existing"
+    )
+    assert (
+        window.bot_page.control_password_input.placeholderText()
+        == "Control Network password saved securely"
+    )

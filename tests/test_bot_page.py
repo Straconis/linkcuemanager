@@ -442,3 +442,83 @@ def test_save_host_control_button_calls_callback(qtbot):
     page.save_host_control_button.click()
 
     assert calls == ["saved"]
+
+
+def _build_pairing_page(qtbot):
+    page = BotPage(
+        "https://linkcue.apps.bot-hosting.cloud",
+        8000,
+        lambda: None,
+        lambda: None,
+        lambda: None,
+        lambda: None,
+        lambda: None,
+        lambda: None,
+        lambda: None,
+        lambda: None,
+        pair_manager_callback=lambda: None,
+        connection_mode="automatic",
+    )
+    qtbot.addWidget(page)
+    return page
+
+
+def test_bot_tab_has_linkcue_security_pairing_group(qtbot):
+    page = _build_pairing_page(qtbot)
+
+    assert page.security_group.title() == "LinkCue Security"
+    assert (
+        page.security_group.objectName()
+        == "linkCueSecurityGroup"
+    )
+
+    assert (
+        page.control_password_input.objectName()
+        == "controlNetworkPasswordInput"
+    )
+    assert (
+        page.pair_manager_button.text()
+        == "Pair This Manager"
+    )
+
+
+def test_control_network_password_is_masked(qtbot):
+    page = _build_pairing_page(qtbot)
+
+    assert (
+        page.control_password_input.echoMode()
+        == page.control_password_input.EchoMode.Password
+    )
+
+
+def test_control_network_password_accessor_strips_whitespace(qtbot):
+    page = _build_pairing_page(qtbot)
+
+    page.control_password_input.setText(
+        "  shared-password  "
+    )
+
+    assert (
+        page.control_network_password()
+        == "shared-password"
+    )
+
+
+def test_pairing_status_can_show_saved_and_paired_state(qtbot):
+    page = _build_pairing_page(qtbot)
+
+    page.apply_pairing_state(
+        paired=True,
+        client_id="manager-example",
+        password_saved=True,
+    )
+
+    assert "manager-example" in page.pairing_status_label.text()
+    assert (
+        page.control_password_input.text()
+        == ""
+    )
+    assert (
+        page.control_password_input.placeholderText()
+        == "Control Network password saved securely"
+    )

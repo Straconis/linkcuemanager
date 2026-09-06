@@ -35,6 +35,10 @@ from app.bot_hosting_restart import (
 from app.bot_hosting_restart_worker import (
     BotHostingRestartWorker,
 )
+from app.control_network_credentials import (
+    ControlNetworkCredentialStore,
+)
+from app.linkcue_identity import LinkCueIdentity
 from app.config import APP_NAME, APP_VERSION, DEFAULT_BOT_URL
 from app.queue_event_listener import (
     QueueEventListener,
@@ -69,6 +73,9 @@ class ManagerWindow(QMainWindow):
         self.manager_settings = load_manager_settings()
         self.bot_hosting_credentials = (
             BotHostingCredentialStore()
+        )
+        self.control_network_credentials = (
+            ControlNetworkCredentialStore()
         )
         self._bot_restart_worker = None
 
@@ -218,6 +225,7 @@ class ManagerWindow(QMainWindow):
             self.refresh_logging_setting,
             self.save_host_control_settings,
             self.restart_bot,
+            pair_manager_callback=self.pair_manager,
             connection_mode=connection_mode,
         )
 
@@ -246,6 +254,42 @@ class ManagerWindow(QMainWindow):
             bot_hosting_deployment_id,
             restart_mode,
             api_key_saved=api_key_saved,
+        )
+
+        try:
+            identity = (
+                self.bot_client.identity_store.load_identity()
+            )
+        except Exception:
+            identity = None
+
+        try:
+            control_password_saved = bool(
+                self.control_network_credentials
+                .get_password()
+            )
+        except Exception:
+            control_password_saved = False
+
+        manager_identity = (
+            identity
+            if (
+                identity is not None
+                and str(identity.role).strip().lower()
+                == "manager"
+                and str(identity.client_id).strip()
+            )
+            else None
+        )
+
+        self.bot_page.apply_pairing_state(
+            paired=manager_identity is not None,
+            client_id=(
+                str(manager_identity.client_id).strip()
+                if manager_identity is not None
+                else None
+            ),
+            password_saved=control_password_saved,
         )
 
         self.twitch_page = TwitchPage(
@@ -1308,6 +1352,145 @@ class ManagerWindow(QMainWindow):
             "Logging settings saved."
         )
 
+
+    def pair_manager(self) -> None:
+        self._update_client()
+
+        control_password = (
+            self.bot_page.control_network_password()
+        )
+
+        if not control_password:
+            try:
+                control_password = (
+                    self.control_network_credentials
+                    .get_password()
+                    or ""
+                ).strip()
+            except Exception as exc:
+                self._show_error(exc)
+                return
+
+        if not control_password:
+            self.status_label.setText(
+                "Control Network password is required."
+            )
+            return
+
+        try:
+            pairing = (
+                self.bot_client.create_manager_pairing(
+                    control_password
+                )
+            )
+
+            code = str(
+                pairing.get("code", "")
+            ).strip()
+
+            pairing_role = str(
+                pairing.get("role", "")
+            ).strip().lower()
+
+            if (
+                not code
+                or pairing_role != "manager"
+            ):
+                self.status_label.setText(
+                    "Bot returned an invalid Manager pairing response."
+                )
+                return
+
+            result = self.bot_client.pair_manager(
+                code,
+                control_password,
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        client_id = str(
+            result.get("client_id", "")
+        ).strip()
+
+        role = str(
+            result.get("role", "")
+        ).strip().lower()
+
+        secret = str(
+            result.get("secret", "")
+        ).strip()
+
+        if (
+            not client_id
+            or role != "manager"
+            or not secret
+        ):
+            self.status_label.setText(
+                "Bot returned an invalid Manager identity."
+            )
+            return
+
+        identity = LinkCueIdentity(
+            client_id=client_id,
+            role=role,
+            secret=secret,
+        )
+
+        try:
+            self.bot_client.identity_store.save_identity(
+                identity
+            )
+            self.control_network_credentials.save_password(
+                control_password
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+
+        self.bot_page.apply_pairing_state(
+            paired=True,
+            client_id=client_id,
+            password_saved=True,
+        )
+
+        try:
+            provisioning = (
+                self.bot_client.host_control_provisioning()
+            )
+
+            api_key = str(
+                provisioning.get(
+                    "bot_hosting_api_key",
+                    "",
+                )
+            ).strip()
+
+            if not api_key:
+                raise BotClientError(
+                    "Bot returned an invalid host control "
+                    "provisioning response"
+                )
+
+            self.bot_hosting_credentials.save_api_key(
+                api_key
+            )
+        except Exception as exc:
+            self.status_label.setText(
+                "Manager paired successfully, but host control "
+                f"synchronization failed: {exc}"
+            )
+            return
+
+        self.bot_page.load_host_control_settings(
+            self.bot_page.bot_hosting_deployment_id(),
+            self.bot_page.restart_mode(),
+            api_key_saved=True,
+        )
+
+        self.status_label.setText(
+            "Manager paired and host control synchronized."
+        )
 
     def save_host_control_settings(self) -> None:
         deployment_id = (

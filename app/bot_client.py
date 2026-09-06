@@ -360,6 +360,61 @@ class BotClient:
 
         return result
 
+    def create_manager_pairing(
+        self,
+        control_password: str,
+    ) -> dict:
+        result = self._request(
+            "POST",
+            "/auth/create-pairing",
+            json_body={
+                "role": "manager",
+                "control_password": control_password,
+            },
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid pairing response"
+            )
+
+        return result
+
+    def pair_manager(
+        self,
+        code: str,
+        control_password: str,
+    ) -> dict:
+        result = self._request(
+            "POST",
+            "/auth/pair",
+            json_body={
+                "code": code,
+                "role": "manager",
+                "control_password": control_password,
+            },
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid client identity response"
+            )
+
+        return result
+
+    def host_control_provisioning(self) -> dict:
+        result = self._request(
+            "GET",
+            "/provisioning/host-control",
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid host control provisioning response"
+            )
+
+        return result
+
     def twitch_auth_status(self) -> dict:
         return self._request(
             "GET",

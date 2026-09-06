@@ -462,3 +462,95 @@ def test_set_twitch_setting():
         "channel": "specialchannel",
         "populate_channel_from_url": False,
     }
+
+
+def test_create_manager_pairing_request():
+    def handler(request):
+        assert request.method == "POST"
+        assert request.url.path == "/auth/create-pairing"
+
+        payload = json.loads(
+            request.content.decode("utf-8")
+        )
+
+        assert payload == {
+            "role": "manager",
+            "control_password": "shared-password",
+        }
+
+        return httpx.Response(
+            200,
+            json={
+                "code": "123456",
+                "role": "manager",
+                "expires_at": "2026-09-06T08:00:00+00:00",
+            },
+        )
+
+    client = make_client(handler)
+
+    result = client.create_manager_pairing(
+        "shared-password"
+    )
+
+    assert result["code"] == "123456"
+    assert result["role"] == "manager"
+
+
+def test_pair_manager_client():
+    def handler(request):
+        assert request.method == "POST"
+        assert request.url.path == "/auth/pair"
+
+        payload = json.loads(
+            request.content.decode("utf-8")
+        )
+
+        assert payload == {
+            "code": "123456",
+            "role": "manager",
+            "control_password": "shared-password",
+        }
+
+        return httpx.Response(
+            200,
+            json={
+                "client_id": "manager-example",
+                "role": "manager",
+                "secret": "ab" * 32,
+            },
+        )
+
+    client = make_client(handler)
+
+    result = client.pair_manager(
+        "123456",
+        "shared-password",
+    )
+
+    assert result == {
+        "client_id": "manager-example",
+        "role": "manager",
+        "secret": "ab" * 32,
+    }
+
+
+def test_host_control_provisioning():
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.path == "/provisioning/host-control"
+
+        return httpx.Response(
+            200,
+            json={
+                "bot_hosting_api_key": "host-control-secret",
+            },
+        )
+
+    client = make_client(handler)
+
+    result = client.host_control_provisioning()
+
+    assert result == {
+        "bot_hosting_api_key": "host-control-secret",
+    }

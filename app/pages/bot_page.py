@@ -63,6 +63,7 @@ class BotPage(QWidget):
         save_host_control_callback: Callable[[], None],
         restart_bot_callback: Callable[[], None],
         *,
+        pair_manager_callback: Callable[[], None] | None = None,
         connection_mode: str = "automatic",
         parent: QWidget | None = None,
     ):
@@ -218,6 +219,81 @@ class BotPage(QWidget):
 
         group_layout.addWidget(
             self.connection_group
+        )
+
+        self.security_group = QGroupBox(
+            "LinkCue Security"
+        )
+        self.security_group.setObjectName(
+            "linkCueSecurityGroup"
+        )
+        security_layout = QVBoxLayout(
+            self.security_group
+        )
+
+        security_row = QHBoxLayout()
+
+        security_row.addWidget(
+            QLabel("Control Network Password:")
+        )
+
+        self.control_password_input = QLineEdit()
+        self.control_password_input.setObjectName(
+            "controlNetworkPasswordInput"
+        )
+        self.control_password_input.setEchoMode(
+            QLineEdit.EchoMode.Password
+        )
+        self.control_password_input.setPlaceholderText(
+            "Enter Control Network password"
+        )
+        security_row.addWidget(
+            self.control_password_input,
+            1,
+        )
+
+        self.pair_manager_button = QPushButton(
+            "Pair This Manager"
+        )
+        self.pair_manager_button.setObjectName(
+            "pairManagerButton"
+        )
+
+        if pair_manager_callback is not None:
+            self.pair_manager_button.clicked.connect(
+                pair_manager_callback
+            )
+
+        security_row.addWidget(
+            self.pair_manager_button
+        )
+
+        security_layout.addLayout(
+            security_row
+        )
+
+        pairing_status_row = QHBoxLayout()
+        pairing_status_row.addWidget(
+            QLabel("Pairing Status:")
+        )
+
+        self.pairing_status_label = QLabel(
+            "Not paired"
+        )
+        self.pairing_status_label.setObjectName(
+            "pairingStatusLabel"
+        )
+        pairing_status_row.addWidget(
+            self.pairing_status_label,
+            1,
+        )
+
+        security_layout.addLayout(
+            pairing_status_row
+        )
+
+        group_layout.addWidget(
+            self.security_group
         )
 
         self.public_web_group = QGroupBox(
@@ -661,6 +737,41 @@ class BotPage(QWidget):
 
         layout.addWidget(group)
         layout.addStretch()
+
+    def control_network_password(self) -> str:
+        return self.control_password_input.text().strip()
+
+    def apply_pairing_state(
+        self,
+        *,
+        paired: bool,
+        client_id: str | None = None,
+        password_saved: bool = False,
+    ) -> None:
+        self.control_password_input.clear()
+
+        if password_saved:
+            self.control_password_input.setPlaceholderText(
+                "Control Network password saved securely"
+            )
+        else:
+            self.control_password_input.setPlaceholderText(
+                "Enter Control Network password"
+            )
+
+        if paired:
+            if client_id:
+                self.pairing_status_label.setText(
+                    f"Paired as {client_id}"
+                )
+            else:
+                self.pairing_status_label.setText(
+                    "Paired"
+                )
+        else:
+            self.pairing_status_label.setText(
+                "Not paired"
+            )
 
     def bot_hosting_deployment_id(self) -> str:
         return (

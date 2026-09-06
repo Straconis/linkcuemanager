@@ -69,7 +69,8 @@ def test_dark_theme_styles_dialogs_and_combo_boxes():
     source = inspect.getsource(ManagerWindow.set_dark_mode)
     dark_source = source.split("else:", 1)[0]
 
-    assert "QDialog {" in dark_source
+    assert "QDialog," in dark_source
+    assert "QMessageBox {" in dark_source
     assert "QComboBox {" in dark_source
     assert "QComboBox:focus {" in dark_source
 
