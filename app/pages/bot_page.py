@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -59,6 +60,7 @@ class BotPage(QWidget):
         refresh_public_web_callback: Callable[[], None],
         save_logging_callback: Callable[[], None],
         refresh_logging_callback: Callable[[], None],
+        save_host_control_callback: Callable[[], None],
         restart_bot_callback: Callable[[], None],
         *,
         connection_mode: str = "automatic",
@@ -544,8 +546,70 @@ class BotPage(QWidget):
         self.maintenance_group.setObjectName(
             "maintenanceGroup"
         )
-        maintenance_layout = QHBoxLayout(
+        maintenance_layout = QVBoxLayout(
             self.maintenance_group
+        )
+
+        host_control_form = QFormLayout()
+
+        self.bot_hosting_deployment_id_input = QLineEdit()
+        self.bot_hosting_deployment_id_input.setObjectName(
+            "botHostingDeploymentIdInput"
+        )
+        host_control_form.addRow(
+            "Deployment ID:",
+            self.bot_hosting_deployment_id_input,
+        )
+
+        self.bot_hosting_api_key_input = QLineEdit()
+        self.bot_hosting_api_key_input.setObjectName(
+            "botHostingApiKeyInput"
+        )
+        self.bot_hosting_api_key_input.setEchoMode(
+            QLineEdit.EchoMode.Password
+        )
+        self.bot_hosting_api_key_input.setPlaceholderText(
+            "Bot-Hosting API key stored securely in the OS credential store"
+        )
+        host_control_form.addRow(
+            "Bot-Hosting API Key:",
+            self.bot_hosting_api_key_input,
+        )
+
+        self.restart_mode_input = QComboBox()
+        self.restart_mode_input.setObjectName(
+            "restartModeInput"
+        )
+        self.restart_mode_input.addItem(
+            "Simulated Restart",
+            "simulated",
+        )
+        self.restart_mode_input.addItem(
+            "Direct Restart",
+            "direct",
+        )
+        host_control_form.addRow(
+            "Restart Mode:",
+            self.restart_mode_input,
+        )
+
+        maintenance_layout.addLayout(
+            host_control_form
+        )
+
+        maintenance_button_row = QHBoxLayout()
+
+        self.save_host_control_button = QPushButton(
+            "Save Host Control"
+        )
+        self.save_host_control_button.setObjectName(
+            "saveHostControlButton"
+        )
+        self.save_host_control_button.clicked.connect(
+            save_host_control_callback
+        )
+        maintenance_button_row.addWidget(
+            self.save_host_control_button
         )
 
         self.restart_bot_button = QPushButton(
@@ -557,11 +621,15 @@ class BotPage(QWidget):
         self.restart_bot_button.clicked.connect(
             restart_bot_callback
         )
-        maintenance_layout.addWidget(
+        maintenance_button_row.addWidget(
             self.restart_bot_button
         )
 
-        maintenance_layout.addStretch()
+        maintenance_button_row.addStretch()
+
+        maintenance_layout.addLayout(
+            maintenance_button_row
+        )
 
         group_layout.addWidget(
             self.maintenance_group
@@ -593,6 +661,71 @@ class BotPage(QWidget):
 
         layout.addWidget(group)
         layout.addStretch()
+
+    def bot_hosting_deployment_id(self) -> str:
+        return (
+            self.bot_hosting_deployment_id_input
+            .text()
+            .strip()
+        )
+
+    def bot_hosting_api_key(self) -> str:
+        return (
+            self.bot_hosting_api_key_input
+            .text()
+            .strip()
+        )
+
+    def restart_mode(self) -> str:
+        value = self.restart_mode_input.currentData()
+
+        if value in {
+            "simulated",
+            "direct",
+        }:
+            return value
+
+        return "simulated"
+
+    def load_host_control_settings(
+        self,
+        deployment_id: str,
+        restart_mode: str,
+        *,
+        api_key_saved: bool = False,
+    ) -> None:
+        self.bot_hosting_deployment_id_input.setText(
+            deployment_id
+        )
+
+        normalized_mode = (
+            restart_mode
+            if restart_mode in {
+                "simulated",
+                "direct",
+            }
+            else "simulated"
+        )
+
+        index = self.restart_mode_input.findData(
+            normalized_mode
+        )
+
+        if index >= 0:
+            self.restart_mode_input.setCurrentIndex(
+                index
+            )
+
+        self.bot_hosting_api_key_input.clear()
+
+        if api_key_saved:
+            self.bot_hosting_api_key_input.setPlaceholderText(
+                "Bot-Hosting API key saved securely"
+            )
+        else:
+            self.bot_hosting_api_key_input.setPlaceholderText(
+                "Bot-Hosting API key stored securely in the OS credential store"
+            )
 
     def bot_host(self) -> str:
         host = self.bot_url_input.text().strip().rstrip("/")

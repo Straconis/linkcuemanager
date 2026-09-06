@@ -14,6 +14,7 @@ def _build_page(qtbot, *, mode="automatic"):
         lambda: None,
         lambda: None,
         lambda: None,
+        lambda: None,
         connection_mode=mode,
     )
     qtbot.addWidget(page)
@@ -250,6 +251,7 @@ def test_bot_connection_url_does_not_seed_public_web_url(qtbot):
         lambda: None,
         lambda: None,
         lambda: None,
+        lambda: None,
         connection_mode="manual",
     )
     qtbot.addWidget(page)
@@ -368,3 +370,75 @@ def test_public_web_links_copy_url_to_clipboard(
 
         assert clipboard.text() == expected_url
 
+
+
+def test_host_control_defaults_to_simulated_restart(qtbot):
+    page = _build_page(qtbot)
+
+    assert page.restart_mode() == "simulated"
+    assert page.bot_hosting_deployment_id() == ""
+    assert page.bot_hosting_api_key() == ""
+
+
+def test_host_control_settings_can_be_loaded(qtbot):
+    page = _build_page(qtbot)
+
+    page.load_host_control_settings(
+        "deployment-123",
+        "direct",
+        api_key_saved=True,
+    )
+
+    assert (
+        page.bot_hosting_deployment_id()
+        == "deployment-123"
+    )
+    assert page.restart_mode() == "direct"
+    assert page.bot_hosting_api_key() == ""
+    assert (
+        page.bot_hosting_api_key_input.placeholderText()
+        == "Bot-Hosting API key saved securely"
+    )
+
+
+def test_invalid_restart_mode_falls_back_to_simulated(qtbot):
+    page = _build_page(qtbot)
+
+    page.load_host_control_settings(
+        "deployment-123",
+        "definitely-not-valid",
+    )
+
+    assert page.restart_mode() == "simulated"
+
+
+def test_host_control_api_key_is_password_masked(qtbot):
+    page = _build_page(qtbot)
+
+    assert (
+        page.bot_hosting_api_key_input.echoMode()
+        == page.bot_hosting_api_key_input.EchoMode.Password
+    )
+
+
+def test_save_host_control_button_calls_callback(qtbot):
+    calls = []
+
+    page = BotPage(
+        "https://linkcue.apps.bot-hosting.cloud",
+        8000,
+        lambda: None,
+        lambda: None,
+        lambda: None,
+        lambda: None,
+        lambda: None,
+        lambda: None,
+        lambda: calls.append("saved"),
+        lambda: None,
+        connection_mode="automatic",
+    )
+    qtbot.addWidget(page)
+
+    page.save_host_control_button.click()
+
+    assert calls == ["saved"]

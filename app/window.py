@@ -23,6 +23,18 @@ from PySide6.QtWidgets import (
 )
 
 from app.bot_client import BotClient, BotClientError
+from app.bot_hosting_client import (
+    BotHostingClient,
+)
+from app.bot_hosting_credentials import (
+    BotHostingCredentialStore,
+)
+from app.bot_hosting_restart import (
+    BotHostingRestartService,
+)
+from app.bot_hosting_restart_worker import (
+    BotHostingRestartWorker,
+)
 from app.config import APP_NAME, APP_VERSION, DEFAULT_BOT_URL
 from app.queue_event_listener import (
     QueueEventListener,
@@ -55,6 +67,10 @@ class ManagerWindow(QMainWindow):
 
         self.shared_settings = load_shared_settings()
         self.manager_settings = load_manager_settings()
+        self.bot_hosting_credentials = (
+            BotHostingCredentialStore()
+        )
+        self._bot_restart_worker = None
 
         configured_url = os.getenv(
             "LINKCUE_BOT_URL",
@@ -200,8 +216,36 @@ class ManagerWindow(QMainWindow):
             self.refresh_public_web_setting,
             self.save_logging_setting,
             self.refresh_logging_setting,
+            self.save_host_control_settings,
             self.restart_bot,
             connection_mode=connection_mode,
+        )
+
+        bot_hosting_deployment_id = str(
+            self.manager_settings.get(
+                "bot_hosting_deployment_id",
+                "",
+            )
+        )
+
+        restart_mode = str(
+            self.manager_settings.get(
+                "bot_restart_mode",
+                "simulated",
+            )
+        )
+
+        try:
+            api_key_saved = bool(
+                self.bot_hosting_credentials.get_api_key()
+            )
+        except Exception:
+            api_key_saved = False
+
+        self.bot_page.load_host_control_settings(
+            bot_hosting_deployment_id,
+            restart_mode,
+            api_key_saved=api_key_saved,
         )
 
         self.twitch_page = TwitchPage(
@@ -378,8 +422,13 @@ class ManagerWindow(QMainWindow):
                     color: #f1f3f5;
                 }
 
-                QDialog {
+                QDialog,
+                QMessageBox {
                     background-color: #111318;
+                    color: #f1f3f5;
+                }
+
+                QMessageBox QLabel {
                     color: #f1f3f5;
                 }
 
@@ -701,6 +750,16 @@ class ManagerWindow(QMainWindow):
                 QMainWindow,
                 QWidget#managerRoot {
                     background-color: #f4f6f9;
+                    color: #20252d;
+                }
+
+                QDialog,
+                QMessageBox {
+                    background-color: #f4f6f9;
+                    color: #20252d;
+                }
+
+                QMessageBox QLabel {
                     color: #20252d;
                 }
 
@@ -1250,14 +1309,105 @@ class ManagerWindow(QMainWindow):
         )
 
 
+    def save_host_control_settings(self) -> None:
+        deployment_id = (
+            self.bot_page.bot_hosting_deployment_id()
+        )
+        restart_mode = (
+            self.bot_page.restart_mode()
+        )
+        api_key = (
+            self.bot_page.bot_hosting_api_key()
+        )
+
+        manager_settings = load_manager_settings()
+        manager_settings[
+            "bot_hosting_deployment_id"
+        ] = deployment_id
+        manager_settings[
+            "bot_restart_mode"
+        ] = restart_mode
+
+        if api_key:
+            try:
+                self.bot_hosting_credentials.save_api_key(
+                    api_key
+                )
+            except Exception as exc:
+                self._show_error(exc)
+                return
+
+        save_manager_settings(
+            manager_settings
+        )
+        self.manager_settings = manager_settings
+
+        try:
+            api_key_saved = bool(
+                self.bot_hosting_credentials.get_api_key()
+            )
+        except Exception:
+            api_key_saved = False
+
+        self.bot_page.load_host_control_settings(
+            deployment_id,
+            restart_mode,
+            api_key_saved=api_key_saved,
+        )
+
+        self.status_label.setText(
+            "Host control settings saved."
+        )
+
     def restart_bot(self) -> None:
         from PySide6.QtWidgets import QMessageBox
+
+        if (
+            self._bot_restart_worker is not None
+            and self._bot_restart_worker.is_running()
+        ):
+            self.status_label.setText(
+                "Bot restart is already in progress."
+            )
+            return
+
+        deployment_id = (
+            self.bot_page.bot_hosting_deployment_id()
+        )
+        restart_mode = self.bot_page.restart_mode()
+
+        if not deployment_id:
+            self.status_label.setText(
+                "Bot-Hosting deployment ID is required."
+            )
+            return
+
+        try:
+            api_key = (
+                self.bot_hosting_credentials.get_api_key()
+            )
+        except Exception as exc:
+            self._show_error(exc)
+            return
+
+        if not api_key:
+            self.status_label.setText(
+                "Bot-Hosting API key is required."
+            )
+            return
+
+        mode_label = (
+            "simulated Stop -> Start"
+            if restart_mode == "simulated"
+            else "direct Restart"
+        )
 
         answer = QMessageBox.question(
             self,
             "Restart Bot",
             (
                 "Restart the LinkCue Bot?\n\n"
+                f"Method: {mode_label}\n\n"
                 "The Bot connection will be briefly unavailable "
                 "while it restarts."
             ),
@@ -1273,15 +1423,91 @@ class ManagerWindow(QMainWindow):
 
         self._update_client()
 
-        try:
-            self.bot_client.restart_bot()
-        except BotClientError as exc:
-            self._show_error(exc)
-            return
+        hosting_client = BotHostingClient(
+            api_key,
+            deployment_id,
+        )
+
+        restart_service = BotHostingRestartService(
+            hosting_client,
+            self.bot_client.base_url,
+        )
+
+        worker = BotHostingRestartWorker(
+            restart_service,
+            restart_mode,
+        )
+
+        worker.started.connect(
+            self._bot_restart_started
+        )
+        worker.completed.connect(
+            self._bot_restart_completed
+        )
+        worker.failed.connect(
+            self._bot_restart_failed
+        )
+
+        self._bot_restart_worker = worker
+        self.bot_page.restart_bot_button.setEnabled(
+            False
+        )
+
+        if not worker.start():
+            self.bot_page.restart_bot_button.setEnabled(
+                True
+            )
+            self.status_label.setText(
+                "Bot restart is already in progress."
+            )
+
+    def _bot_restart_started(
+        self,
+        mode: str,
+    ) -> None:
+        if mode == "simulated":
+            message = (
+                "Simulated Bot restart in progress: "
+                "stopping, starting, then verifying health."
+            )
+        else:
+            message = (
+                "Direct Bot restart in progress. "
+                "Waiting for the Bot to return healthy."
+            )
+
+        self.status_label.setText(message)
+
+    def _bot_restart_completed(
+        self,
+        result: dict,
+    ) -> None:
+        self.bot_page.restart_bot_button.setEnabled(
+            True
+        )
+
+        mode = str(
+            result.get(
+                "mode",
+                "unknown",
+            )
+        )
 
         self.status_label.setText(
-            "Bot restart requested. "
-            "Connection may be briefly unavailable."
+            f"Bot restart complete ({mode}). "
+            "Health check passed."
+        )
+
+    def _bot_restart_failed(
+        self,
+        message: str,
+    ) -> None:
+        self.bot_page.restart_bot_button.setEnabled(
+            True
+        )
+
+        self.status_label.setText(
+            f"Bot restart failed: {message}"
         )
 
     def refresh_player_status(self) -> None:

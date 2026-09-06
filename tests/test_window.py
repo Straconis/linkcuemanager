@@ -1320,7 +1320,7 @@ def test_restart_bot_cancel_does_not_request_restart(
     assert calls == []
 
 
-def test_restart_bot_confirm_requests_restart_once(
+def test_restart_bot_confirm_starts_host_worker_once(
     qtbot,
     monkeypatch,
 ):
@@ -1329,16 +1329,85 @@ def test_restart_bot_confirm_requests_restart_once(
     window = ManagerWindow()
     qtbot.addWidget(window)
 
-    calls = []
+    window.bot_page.bot_hosting_deployment_id_input.setText(
+        "deployment-123"
+    )
+    window.bot_page.load_host_control_settings(
+        "deployment-123",
+        "simulated",
+        api_key_saved=True,
+    )
 
-    class FakeClient:
-        def restart_bot(self):
-            calls.append(True)
-            return {"status": "restart_requested"}
+    window.bot_hosting_credentials.get_api_key = (
+        lambda: "secret-api-key"
+    )
 
-    window.bot_client = FakeClient()
+    class FakeBotClient:
+        base_url = "https://linkcue.example"
+
+    window.bot_client = FakeBotClient()
     window._update_client = lambda: None
 
+    created = {}
+
+    class FakeHostingClient:
+        def __init__(
+            self,
+            api_key,
+            deployment_id,
+        ):
+            created["api_key"] = api_key
+            created["deployment_id"] = deployment_id
+
+    class FakeRestartService:
+        def __init__(
+            self,
+            client,
+            health_url,
+        ):
+            created["client"] = client
+            created["health_url"] = health_url
+
+    class FakeWorker:
+        def __init__(
+            self,
+            service,
+            mode,
+        ):
+            created["service"] = service
+            created["mode"] = mode
+            created["worker"] = self
+            self.started = FakeSignal()
+            self.completed = FakeSignal()
+            self.failed = FakeSignal()
+            self.start_calls = 0
+
+        def is_running(self):
+            return False
+
+        def start(self):
+            self.start_calls += 1
+            return True
+
+    class FakeSignal:
+        def __init__(self):
+            self.callbacks = []
+
+        def connect(self, callback):
+            self.callbacks.append(callback)
+
+    monkeypatch.setattr(
+        "app.window.BotHostingClient",
+        FakeHostingClient,
+    )
+    monkeypatch.setattr(
+        "app.window.BotHostingRestartService",
+        FakeRestartService,
+    )
+    monkeypatch.setattr(
+        "app.window.BotHostingRestartWorker",
+        FakeWorker,
+    )
     monkeypatch.setattr(
         "app.window.QMessageBox.question",
         lambda *args, **kwargs:
@@ -1347,7 +1416,15 @@ def test_restart_bot_confirm_requests_restart_once(
 
     window.restart_bot()
 
-    assert calls == [True]
+    assert created["api_key"] == "secret-api-key"
+    assert created["deployment_id"] == "deployment-123"
+    assert created["health_url"] == "https://linkcue.example"
+    assert created["mode"] == "simulated"
+    assert created["worker"].start_calls == 1
+    assert (
+        window.bot_page.restart_bot_button.isEnabled()
+        is False
+    )
 
 
 def test_queue_snapshot_renders_now_playing_before_queued(qtbot):
@@ -2140,4 +2217,99 @@ def test_streamer_save_button_is_available(
     assert (
         window.streamer_page.save_settings_button.text()
         == "Save Settings"
+    )
+
+
+def test_restart_bot_requires_deployment_id(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    window.bot_page.load_host_control_settings(
+        "",
+        "simulated",
+        api_key_saved=True,
+    )
+
+    window.restart_bot()
+
+    assert (
+        window.status_label.text()
+        == "Bot-Hosting deployment ID is required."
+    )
+
+
+def test_restart_bot_requires_api_key(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    window.bot_page.load_host_control_settings(
+        "deployment-123",
+        "simulated",
+        api_key_saved=False,
+    )
+
+    window.bot_hosting_credentials.get_api_key = (
+        lambda: None
+    )
+
+    window.restart_bot()
+
+    assert (
+        window.status_label.text()
+        == "Bot-Hosting API key is required."
+    )
+
+
+def test_bot_restart_completion_reenables_button(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    window.bot_page.restart_bot_button.setEnabled(
+        False
+    )
+
+    window._bot_restart_completed(
+        {
+            "mode": "simulated",
+            "health": {
+                "status": "ok",
+            },
+        }
+    )
+
+    assert (
+        window.bot_page.restart_bot_button.isEnabled()
+        is True
+    )
+    assert (
+        window.status_label.text()
+        == (
+            "Bot restart complete (simulated). "
+            "Health check passed."
+        )
+    )
+
+
+def test_bot_restart_failure_reenables_button(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    window.bot_page.restart_bot_button.setEnabled(
+        False
+    )
+
+    window._bot_restart_failed(
+        "Bot-Hosting returned HTTP 504."
+    )
+
+    assert (
+        window.bot_page.restart_bot_button.isEnabled()
+        is True
+    )
+    assert (
+        window.status_label.text()
+        == (
+            "Bot restart failed: "
+            "Bot-Hosting returned HTTP 504."
+        )
     )
