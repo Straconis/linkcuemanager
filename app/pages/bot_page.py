@@ -165,6 +165,7 @@ class BotPage(QWidget):
         self.bot_url_input = QLineEdit(initial_host)
         self.bot_url_input.setObjectName("botUrlInput")
         self.bot_url_input.setMinimumWidth(280)
+        self.bot_url_input.setMaximumWidth(560)
         connection_row.addWidget(
             self.bot_url_input,
             1,
@@ -257,6 +258,7 @@ class BotPage(QWidget):
         self.control_password_input.setPlaceholderText(
             "Enter Control Network password"
         )
+        self.control_password_input.setMaximumWidth(520)
         security_row.addWidget(
             self.control_password_input,
             1,
@@ -274,9 +276,11 @@ class BotPage(QWidget):
                 pair_manager_callback
             )
 
+        self.pair_manager_button.setMaximumWidth(160)
         security_row.addWidget(
             self.pair_manager_button
         )
+        security_row.addStretch()
 
         security_layout.addLayout(
             security_row
@@ -367,6 +371,7 @@ class BotPage(QWidget):
             "publicWebUrlInput"
         )
         self.public_web_url_input.setMinimumWidth(280)
+        self.public_web_url_input.setMaximumWidth(420)
         web_config_row.addWidget(
             self.public_web_url_input,
             1,

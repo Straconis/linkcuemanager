@@ -231,6 +231,11 @@ def test_bot_and_public_web_hosts_have_room_for_hostnames(qtbot):
     assert page.bot_url_input.minimumWidth() >= 280
     assert page.public_web_url_input.minimumWidth() >= 280
 
+    assert page.bot_url_input.maximumWidth() == 560
+    assert page.control_password_input.maximumWidth() == 520
+    assert page.public_web_url_input.maximumWidth() == 420
+    assert page.pair_manager_button.maximumWidth() == 160
+
     assert (
         page.bot_url_input.minimumWidth()
         > page.bot_port_input.maximumWidth()
