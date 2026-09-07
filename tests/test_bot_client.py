@@ -128,6 +128,90 @@ def test_twitch_status():
     }
 
 
+def test_twitch_auth_status():
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.path == "/twitch/auth/status"
+
+        return httpx.Response(
+            200,
+            json={
+                "authorized": True,
+                "user_id": "12345",
+                "login": "linkcuebot",
+            },
+        )
+
+    client = make_client(handler)
+
+    assert client.twitch_auth_status() == {
+        "authorized": True,
+        "user_id": "12345",
+        "login": "linkcuebot",
+    }
+
+
+def test_authorize_twitch():
+    def handler(request):
+        assert request.method == "POST"
+        assert request.url.path == "/twitch/auth/authorize"
+
+        return httpx.Response(
+            200,
+            json={
+                "authorization_url": "https://example.test/twitch/oauth",
+            },
+        )
+
+    client = make_client(handler)
+
+    assert client.authorize_twitch() == {
+        "authorization_url": "https://example.test/twitch/oauth",
+    }
+
+
+def test_connect_twitch():
+    def handler(request):
+        assert request.method == "POST"
+        assert request.url.path == "/twitch/connect"
+
+        return httpx.Response(
+            200,
+            json={
+                "connected": True,
+                "channels": [],
+            },
+        )
+
+    client = make_client(handler)
+
+    assert client.connect_twitch() == {
+        "connected": True,
+        "channels": [],
+    }
+
+
+def test_disconnect_twitch():
+    def handler(request):
+        assert request.method == "POST"
+        assert request.url.path == "/twitch/disconnect"
+
+        return httpx.Response(
+            200,
+            json={
+                "connected": False,
+                "channels": [],
+            },
+        )
+
+    client = make_client(handler)
+
+    assert client.disconnect_twitch() == {
+        "connected": False,
+        "channels": [],
+    }
+
+
 def test_join_twitch_channel():
     def handler(request):
         assert request.method == "POST"
