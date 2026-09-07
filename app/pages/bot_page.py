@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -92,6 +93,15 @@ class BotPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 12)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(
+            QScrollArea.Shape.NoFrame
+        )
+        scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
 
         group = QGroupBox("LinkCue Bot")
         group_layout = QVBoxLayout(group)
@@ -735,8 +745,8 @@ class BotPage(QWidget):
 
         self._refresh_public_web_links()
 
-        layout.addWidget(group)
-        layout.addStretch()
+        scroll_area.setWidget(group)
+        layout.addWidget(scroll_area)
 
     def control_network_password(self) -> str:
         return self.control_password_input.text().strip()
