@@ -65,11 +65,13 @@ class BotClient:
                 identity = self.identity_store.load_identity()
 
                 if identity:
-                    headers = create_signed_headers(
-                        identity,
-                        method=method,
-                        path=path,
-                        body=body,
+                    headers.update(
+                        create_signed_headers(
+                            identity,
+                            method=method,
+                            path=path,
+                            body=body,
+                        )
                     )
 
                 response = client.request(

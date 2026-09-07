@@ -3,6 +3,7 @@ import httpx
 import pytest
 
 from app.bot_client import BotClient, BotClientError
+from app.linkcue_identity import LinkCueIdentity
 
 
 def make_client(handler):
@@ -554,3 +555,50 @@ def test_host_control_provisioning():
     assert result == {
         "bot_hosting_api_key": "host-control-secret",
     }
+
+def test_signed_json_request_keeps_content_type(monkeypatch):
+    def handler(request):
+        assert request.method == "POST"
+        assert request.url.path == "/auth/create-pairing"
+        assert (
+            request.headers["Content-Type"]
+            == "application/json"
+        )
+
+        payload = json.loads(
+            request.content.decode("utf-8")
+        )
+
+        assert payload == {
+            "role": "manager",
+            "control_password": "shared-password",
+        }
+
+        return httpx.Response(
+            200,
+            json={
+                "code": "123456",
+                "role": "manager",
+                "expires_at": "future",
+            },
+        )
+
+    client = make_client(handler)
+
+    identity = LinkCueIdentity(
+        client_id="manager-existing",
+        role="manager",
+        secret="ab" * 32,
+    )
+
+    monkeypatch.setattr(
+        client.identity_store,
+        "load_identity",
+        lambda: identity,
+    )
+
+    result = client.create_manager_pairing(
+        "shared-password"
+    )
+
+    assert result["code"] == "123456"
