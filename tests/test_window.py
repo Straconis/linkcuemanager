@@ -35,10 +35,71 @@ def test_window_has_twitch_controls(qtbot):
     window = ManagerWindow()
     qtbot.addWidget(window)
 
-    assert window.twitch_page.channel_input is not None
     assert window.twitch_page.join_button.text() == "Join Channel"
     assert window.twitch_page.leave_button.text() == "Leave Channel"
     assert window.twitch_page.channel_list is not None
+
+
+def test_join_uses_configured_streamer_channel(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    calls = []
+
+    class FakeClient:
+        def join_twitch_channel(self, channel):
+            calls.append(channel)
+            return {
+                "status": "joined",
+                "channel": channel,
+                "channels": [channel],
+            }
+
+    window.streamer_page.load_settings(
+        "SmokeEEG",
+        "https://twitch.tv/smokeeeg",
+        "smokeeeg",
+        True,
+        True,
+    )
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.join_channel()
+
+    assert calls == ["smokeeeg"]
+
+
+def test_leave_falls_back_to_configured_streamer_channel(qtbot):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    calls = []
+
+    class FakeClient:
+        def leave_twitch_channel(self, channel):
+            calls.append(channel)
+            return {
+                "status": "left",
+                "channel": channel,
+                "channels": [],
+            }
+
+    window.streamer_page.load_settings(
+        "SmokeEEG",
+        "https://twitch.tv/smokeeeg",
+        "smokeeeg",
+        True,
+        True,
+    )
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.leave_channel()
+
+    assert calls == ["smokeeeg"]
 
 
 def test_window_has_queue_table(qtbot):
@@ -1976,6 +2037,24 @@ def test_save_streamer_name_is_manager_local(
         "PapaSmoke"
     )
 
+    class FakeClient:
+        def set_twitch_setting(
+            self,
+            channel_url,
+            channel,
+            populate_channel_from_url,
+        ):
+            return {
+                "channel_url": channel_url,
+                "channel": channel,
+                "populate_channel_from_url": (
+                    populate_channel_from_url
+                ),
+            }
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
     window.save_streamer_settings()
 
     assert saved_manager[-1]["streamer_name"] == "PapaSmoke"
@@ -2027,6 +2106,10 @@ def test_refresh_twitch_setting_derives_streamer_name_when_enabled(
     assert (
         window.streamer_page.configured_channel()
         == "specialchannel"
+    )
+    assert (
+        window.twitch_page.configured_channel_label.text()
+        == "Configured Channel: specialchannel"
     )
     assert (
         window.streamer_page
@@ -2736,4 +2819,53 @@ def test_refresh_twitch_status_failure_marks_twitch_unavailable(
     )
     assert window.twitch_page.status_label.text() == "Unavailable"
     assert window.twitch_page.channel_list.count() == 0
+
+def test_save_streamer_settings_does_not_persist_local_state_when_bot_save_fails(
+    qtbot,
+    monkeypatch,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    saved_manager_settings = []
+
+    monkeypatch.setattr(
+        "app.window.load_manager_settings",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        "app.window.save_manager_settings",
+        lambda settings: saved_manager_settings.append(
+            dict(settings)
+        ),
+    )
+    monkeypatch.setattr(
+        window,
+        "_show_error",
+        lambda exc: None,
+    )
+
+    class FakeClient:
+        def set_twitch_setting(
+            self,
+            channel_url,
+            channel,
+            populate_channel_from_url,
+        ):
+            raise BotClientError("Bot unavailable")
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.streamer_page.load_settings(
+        "Boomer",
+        "https://twitch.tv/smokeeeg",
+        "specialchannel",
+        False,
+        False,
+    )
+
+    window.save_streamer_settings()
+
+    assert saved_manager_settings == []
 

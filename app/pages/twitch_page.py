@@ -4,7 +4,6 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QPushButton,
     QVBoxLayout,
@@ -92,13 +91,17 @@ class TwitchPage(QWidget):
         group = QGroupBox("Twitch Channels")
         group_layout = QVBoxLayout(group)
 
-        controls = QHBoxLayout()
-
-        self.channel_input = QLineEdit()
-        self.channel_input.setObjectName("channelInput")
-        self.channel_input.setPlaceholderText(
-            "Twitch channel name"
+        self.configured_channel_label = QLabel(
+            "Configured Channel: Not configured"
         )
+        self.configured_channel_label.setObjectName(
+            "configuredChannelLabel"
+        )
+        group_layout.addWidget(
+            self.configured_channel_label
+        )
+
+        controls = QHBoxLayout()
 
         self.join_button = QPushButton("Join Channel")
         self.join_button.setObjectName("joinButton")
@@ -120,10 +123,10 @@ class TwitchPage(QWidget):
             refresh_callback
         )
 
-        controls.addWidget(self.channel_input, 1)
         controls.addWidget(self.join_button)
         controls.addWidget(self.leave_button)
         controls.addWidget(self.refresh_button)
+        controls.addStretch()
 
         group_layout.addLayout(controls)
 
@@ -141,11 +144,20 @@ class TwitchPage(QWidget):
         layout.addWidget(group)
         layout.addStretch()
 
-    def entered_channel(self) -> str:
-        return self.channel_input.text().strip()
+    def set_configured_channel(
+        self,
+        channel: str | None,
+    ) -> None:
+        value = str(channel or "").strip()
 
-    def set_channel(self, channel: str) -> None:
-        self.channel_input.setText(channel)
+        if value:
+            self.configured_channel_label.setText(
+                f"Configured Channel: {value}"
+            )
+        else:
+            self.configured_channel_label.setText(
+                "Configured Channel: Not configured"
+            )
 
     def selected_channel(self) -> str:
         selected = self.channel_list.currentItem()
@@ -154,9 +166,6 @@ class TwitchPage(QWidget):
             return ""
 
         return selected.text()
-
-    def clear_channel_input(self) -> None:
-        self.channel_input.clear()
 
     def apply_auth_status(
         self,

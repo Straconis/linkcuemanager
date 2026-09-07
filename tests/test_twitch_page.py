@@ -30,7 +30,7 @@ def test_runtime_controls_are_available(qtbot):
     assert hasattr(page, "authorize_button")
     assert hasattr(page, "connect_button")
     assert hasattr(page, "disconnect_button")
-    assert hasattr(page, "channel_input")
+    assert hasattr(page, "configured_channel_label")
     assert hasattr(page, "join_button")
     assert hasattr(page, "leave_button")
     assert hasattr(page, "refresh_button")
@@ -38,21 +38,24 @@ def test_runtime_controls_are_available(qtbot):
     assert hasattr(page, "channel_list")
 
 
-def test_runtime_channel_input_round_trip(qtbot):
+def test_configured_channel_display(qtbot):
     page = _build_page(qtbot)
 
-    page.set_channel("SmokeEEG")
+    page.set_configured_channel("smokeeeg")
 
-    assert page.entered_channel() == "SmokeEEG"
+    assert page.configured_channel_label.text() == (
+        "Configured Channel: smokeeeg"
+    )
 
 
-def test_clear_channel_input(qtbot):
+def test_configured_channel_display_handles_missing_channel(qtbot):
     page = _build_page(qtbot)
 
-    page.set_channel("smokeeeg")
-    page.clear_channel_input()
+    page.set_configured_channel(None)
 
-    assert page.entered_channel() == ""
+    assert page.configured_channel_label.text() == (
+        "Configured Channel: Not configured"
+    )
 
 
 def test_selected_channel_returns_current_selection(qtbot):

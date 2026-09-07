@@ -1730,12 +1730,6 @@ class ManagerWindow(QMainWindow):
             .populate_streamer_name_from_url_enabled()
         )
 
-        save_manager_settings(
-            manager_settings
-        )
-
-        self.manager_settings = manager_settings
-
         self._update_client()
 
         try:
@@ -1749,6 +1743,12 @@ class ManagerWindow(QMainWindow):
             self._show_error(exc)
             return
 
+        save_manager_settings(
+            manager_settings
+        )
+
+        self.manager_settings = manager_settings
+
         self.streamer_page.load_settings(
             streamer_name,
             result.get("channel_url"),
@@ -1761,6 +1761,10 @@ class ManagerWindow(QMainWindow):
                     True,
                 )
             ),
+        )
+
+        self.twitch_page.set_configured_channel(
+            self.streamer_page.configured_channel()
         )
 
         self.status_label.setText(
@@ -1788,6 +1792,10 @@ class ManagerWindow(QMainWindow):
                     True,
                 )
             ),
+        )
+
+        self.twitch_page.set_configured_channel(
+            self.streamer_page.configured_channel()
         )
 
         self.status_label.setText(
@@ -1869,11 +1877,11 @@ class ManagerWindow(QMainWindow):
         )
 
     def join_channel(self) -> None:
-        channel = self.twitch_page.entered_channel()
+        channel = self.streamer_page.configured_channel()
 
         if not channel:
             self.status_label.setText(
-                "Enter a Twitch channel name."
+                "Configure a Twitch channel on the Streamer tab."
             )
             return
 
@@ -1887,18 +1895,17 @@ class ManagerWindow(QMainWindow):
             self._show_error(exc)
             return
 
-        self.twitch_page.clear_channel_input()
         self._apply_twitch_result(result)
 
     def leave_channel(self) -> None:
-        channel = self.twitch_page.entered_channel()
+        channel = self.twitch_page.selected_channel()
 
         if not channel:
-            channel = self.twitch_page.selected_channel()
+            channel = self.streamer_page.configured_channel()
 
         if not channel:
             self.status_label.setText(
-                "Enter or select a Twitch channel."
+                "Configure a Twitch channel on the Streamer tab."
             )
             return
 
@@ -1912,7 +1919,6 @@ class ManagerWindow(QMainWindow):
             self._show_error(exc)
             return
 
-        self.twitch_page.clear_channel_input()
         self._apply_twitch_result(result)
 
     def _apply_twitch_result(self, result: dict) -> None:
