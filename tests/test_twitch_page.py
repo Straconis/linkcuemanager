@@ -224,3 +224,24 @@ def test_runtime_status_shows_disconnected(qtbot):
         "Connection: Disconnected"
     )
     assert page.status_label.text() == "Inactive"
+
+def test_unavailable_status_clears_stale_runtime_state(qtbot):
+    page = _build_page(qtbot)
+
+    page.apply_status(
+        {
+            "authorized": True,
+            "login": "linkcuebot",
+            "connected": True,
+            "channels": ["smokeeeg"],
+        },
+        use_connected_flag=True,
+    )
+
+    page.show_unavailable()
+
+    assert page.authorization_label.text() == "Authorization: Unknown"
+    assert page.connection_label.text() == "Connection: Unknown"
+    assert page.status_label.text() == "Unavailable"
+    assert page.channel_list.count() == 0
+

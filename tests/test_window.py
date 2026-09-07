@@ -2689,3 +2689,51 @@ def test_window_loads_existing_manager_pairing_state(
         window.bot_page.control_password_input.placeholderText()
         == "Control Network password saved securely"
     )
+
+def test_refresh_twitch_status_failure_marks_twitch_unavailable(
+    qtbot,
+    monkeypatch,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    window.twitch_page.apply_status(
+        {
+            "authorized": True,
+            "login": "linkcuebot",
+            "connected": True,
+            "channels": ["smokeeeg"],
+        },
+        use_connected_flag=True,
+    )
+
+    class FakeClient:
+        def twitch_status(self):
+            raise BotClientError("Bot unavailable")
+
+    window.bot_client = FakeClient()
+
+    monkeypatch.setattr(
+        window,
+        "_update_client",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        window,
+        "_show_error",
+        lambda exc: None,
+    )
+
+    window.refresh_twitch_status()
+
+    assert (
+        window.twitch_page.authorization_label.text()
+        == "Authorization: Unknown"
+    )
+    assert (
+        window.twitch_page.connection_label.text()
+        == "Connection: Unknown"
+    )
+    assert window.twitch_page.status_label.text() == "Unavailable"
+    assert window.twitch_page.channel_list.count() == 0
+

@@ -179,6 +179,16 @@ class TwitchPage(QWidget):
                 "Authorization: Not Authorized"
             )
 
+    def show_unavailable(self) -> None:
+        self.authorization_label.setText(
+            "Authorization: Unknown"
+        )
+        self.connection_label.setText(
+            "Connection: Unknown"
+        )
+        self.status_label.setText("Unavailable")
+        self.channel_list.clear()
+
     def apply_status(
         self,
         result: dict,

@@ -1855,6 +1855,7 @@ class ManagerWindow(QMainWindow):
         try:
             result = self.bot_client.twitch_status()
         except BotClientError as exc:
+            self.twitch_page.show_unavailable()
             self._show_error(exc)
             return
 
