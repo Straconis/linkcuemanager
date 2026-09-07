@@ -3,12 +3,18 @@ from __future__ import annotations
 import json
 import threading
 from collections.abc import Callable
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import websocket
 
 
-def websocket_events_url(base_url: str) -> str:
+def websocket_events_url(
+    base_url: str,
+    *,
+    client_id: str | None = None,
+    app_version: str | None = None,
+    display_name: str | None = None,
+) -> str:
     parts = urlsplit(base_url.rstrip("/"))
 
     if parts.scheme == "http":
@@ -20,12 +26,26 @@ def websocket_events_url(base_url: str) -> str:
             f"Unsupported LinkCue Bot URL scheme: {parts.scheme}"
         )
 
+    query = {
+        "client_type": "manager",
+    }
+
+    for key, value in (
+        ("client_id", client_id),
+        ("app_version", app_version),
+        ("display_name", display_name),
+    ):
+        normalized = str(value or "").strip()
+
+        if normalized:
+            query[key] = normalized
+
     return urlunsplit(
         (
             scheme,
             parts.netloc,
             "/ws/events",
-            "client_type=manager",
+            urlencode(query),
             "",
         )
     )
@@ -37,8 +57,17 @@ class QueueEventListener:
         base_url: str,
         on_queue_refresh: Callable[[dict], None],
         reconnect_delay: float = 2.0,
+        *,
+        client_id: str | None = None,
+        app_version: str | None = None,
+        display_name: str | None = None,
     ) -> None:
-        self.url = websocket_events_url(base_url)
+        self.url = websocket_events_url(
+            base_url,
+            client_id=client_id,
+            app_version=app_version,
+            display_name=display_name,
+        )
         self.on_queue_refresh = on_queue_refresh
         self.reconnect_delay = reconnect_delay
 

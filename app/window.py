@@ -49,7 +49,7 @@ from app.pages.add_video_dialog import AddVideoDialog
 from app.pages.bot_page import BotPage
 from app.pages.queue_page import QueuePage
 from app.pages.manager_page import ManagerPage
-from app.pages.player_page import PlayerPage
+from app.pages.software_page import SoftwarePage
 from app.pages.streamer_page import StreamerPage
 from app.pages.twitch_page import TwitchPage
 from app.settings_store import (
@@ -167,7 +167,7 @@ class ManagerWindow(QMainWindow):
             ("bot", "Bot"),
             ("streamer", "Streamer"),
             ("twitch", "Twitch"),
-            ("player", "Player"),
+            ("software", "Software"),
             ("about", "About"),
         ):
             button = QPushButton(label)
@@ -282,12 +282,16 @@ class ManagerWindow(QMainWindow):
             else None
         )
 
+        self.manager_client_id = (
+            str(manager_identity.client_id).strip()
+            if manager_identity is not None
+            else ""
+        )
+
         self.bot_page.apply_pairing_state(
             paired=manager_identity is not None,
             client_id=(
-                str(manager_identity.client_id).strip()
-                if manager_identity is not None
-                else None
+                self.manager_client_id or None
             ),
             password_saved=control_password_saved,
         )
@@ -301,8 +305,8 @@ class ManagerWindow(QMainWindow):
             self.refresh_twitch_status,
         )
 
-        self.player_page = PlayerPage(
-            self.refresh_player_status
+        self.software_page = SoftwarePage(
+            self.refresh_software_status
         )
 
         self.streamer_page = StreamerPage(
@@ -317,7 +321,7 @@ class ManagerWindow(QMainWindow):
             self.bot_page,
             self.streamer_page,
             self.twitch_page,
-            self.player_page,
+            self.software_page,
             self.about_page,
         ):
             self.page_stack.addWidget(page)
@@ -349,8 +353,11 @@ class ManagerWindow(QMainWindow):
         self.navigation_buttons["twitch"].clicked.connect(
             lambda: self._show_page(4, "twitch")
         )
-        self.navigation_buttons["player"].clicked.connect(
-            lambda: self._show_page(5, "player")
+        self.navigation_buttons["software"].clicked.connect(
+            lambda: self._show_page(5, "software")
+        )
+        self.navigation_buttons["software"].clicked.connect(
+            lambda: self.refresh_software_status()
         )
         self.navigation_buttons["about"].clicked.connect(
             lambda: self._show_page(6, "about")
@@ -426,12 +433,20 @@ class ManagerWindow(QMainWindow):
         self.queue_event_listener = QueueEventListener(
             base_url,
             self.queue_refresh_requested.emit,
+            client_id=(
+                self.manager_client_id or None
+            ),
+            app_version=APP_VERSION,
+            display_name=(
+                self.manager_page.manager_username()
+                or None
+            ),
         )
         self.queue_event_listener.start()
 
         # Establish initial state once the UI event loop starts.
         QTimer.singleShot(0, self.refresh_queue)
-        QTimer.singleShot(0, self.refresh_player_status)
+        QTimer.singleShot(0, self.refresh_software_status)
         QTimer.singleShot(
             0,
             self.refresh_public_web_setting,
@@ -1102,15 +1117,32 @@ class ManagerWindow(QMainWindow):
 
         self.bot_client = BotClient(base_url)
 
+        listener_metadata = {
+            "client_id": (
+                self.manager_client_id or None
+            ),
+            "app_version": APP_VERSION,
+            "display_name": (
+                self.manager_page.manager_username()
+                or None
+            ),
+        }
+
+        expected_url = websocket_events_url(
+            base_url,
+            **listener_metadata,
+        )
+
         if (
             hasattr(self, "queue_event_listener")
             and self.queue_event_listener.url
-            != websocket_events_url(base_url)
+            != expected_url
         ):
             self.queue_event_listener.stop()
             self.queue_event_listener = QueueEventListener(
                 base_url,
                 self.queue_refresh_requested.emit,
+                **listener_metadata,
             )
             self.queue_event_listener.start()
 
@@ -1128,6 +1160,8 @@ class ManagerWindow(QMainWindow):
 
         save_manager_settings(manager_settings)
         self.manager_settings = manager_settings
+
+        self._update_client()
 
         self.status_label.setText(
             "Manager settings saved."
@@ -1454,6 +1488,9 @@ class ManagerWindow(QMainWindow):
             password_saved=True,
         )
 
+        self.manager_client_id = client_id
+        self._update_client()
+
         try:
             provisioning = (
                 self.bot_client.host_control_provisioning()
@@ -1693,24 +1730,24 @@ class ManagerWindow(QMainWindow):
             f"Bot restart failed: {message}"
         )
 
-    def refresh_player_status(self) -> None:
+    def refresh_software_status(self) -> None:
         self._update_client()
 
         try:
-            presence = self.bot_client.player_status()
+            software = self.bot_client.software_status()
             playback = self.bot_client.player_state()
         except BotClientError as exc:
-            self.player_page.show_unavailable()
+            self.software_page.show_unavailable()
             self._show_error(exc)
             return
 
-        self.player_page.apply_status(
-            presence,
+        self.software_page.apply_status(
+            software,
             playback,
         )
 
         self.status_label.setText(
-            "Player status refreshed."
+            "Software status refreshed."
         )
 
 
@@ -2702,6 +2739,24 @@ class ManagerWindow(QMainWindow):
                 "manager_presence_changed",
                 "player_presence_changed",
             }:
+                page_stack = getattr(
+                    self,
+                    "page_stack",
+                    None,
+                )
+                software_page = getattr(
+                    self,
+                    "software_page",
+                    None,
+                )
+
+                if (
+                    page_stack is not None
+                    and software_page is not None
+                    and page_stack.currentWidget()
+                    is software_page
+                ):
+                    self.refresh_software_status()
                 return
 
             if event_type == "queue_changed":

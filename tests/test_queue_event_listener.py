@@ -21,6 +21,21 @@ def test_https_bot_url_becomes_wss_events_url():
     )
 
 
+def test_events_url_includes_encoded_manager_metadata():
+    assert websocket_events_url(
+        "https://linkcue.example.com/",
+        client_id="manager-alpha",
+        app_version="0.1.0",
+        display_name="Steve & Rose",
+    ) == (
+        "wss://linkcue.example.com/ws/events"
+        "?client_type=manager"
+        "&client_id=manager-alpha"
+        "&app_version=0.1.0"
+        "&display_name=Steve+%26+Rose"
+    )
+
+
 def test_unsupported_scheme_is_rejected():
     try:
         websocket_events_url("ftp://linkcue.example.com")

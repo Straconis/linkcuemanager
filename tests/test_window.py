@@ -140,26 +140,46 @@ def test_leave_uses_selected_channel(qtbot):
     assert window.twitch_page.status_label.text() == "Inactive"
 
 
-def test_window_has_player_status_controls(qtbot):
+def test_window_has_software_status_controls(qtbot):
     window = ManagerWindow()
     qtbot.addWidget(window)
 
-    assert window.player_page.player_status_label.text() == "Not checked"
-    assert window.player_page.playback_status_label.text() == "Not checked"
-    assert window.player_page.now_playing_label.text() == "None"
-    assert window.player_page.refresh_button.text() == "Refresh Player"
+    assert window.software_page.bot_status_label.text() == "Not checked"
+    assert window.software_page.bot_version_label.text() == "Unknown"
+    assert window.software_page.manager_table.rowCount() == 0
+    assert window.software_page.player_table.rowCount() == 0
+    assert (
+        window.software_page.refresh_button.text()
+        == "Refresh Software"
+    )
 
 
-def test_refresh_player_status_active_and_playing(qtbot):
+def test_refresh_software_status_displays_connected_clients(qtbot):
     window = ManagerWindow()
     qtbot.addWidget(window)
 
     class FakeClient:
-        def player_status(self):
+        def software_status(self):
             return {
-                "active": True,
-                "last_heartbeat": "2026-08-31T21:00:00+00:00",
-                "timeout_seconds": 15,
+                "bot": {
+                    "status": "online",
+                    "version": "0.1.0",
+                    "api_version": "0.1",
+                },
+                "managers": [
+                    {
+                        "display_name": "Steve",
+                        "version": "0.1.0",
+                        "client_id": "manager-example",
+                    }
+                ],
+                "players": [
+                    {
+                        "display_name": "SmokeEEG",
+                        "version": "0.2.0",
+                        "client_id": "player-example",
+                    }
+                ],
             }
 
         def player_state(self):
@@ -174,23 +194,40 @@ def test_refresh_player_status_active_and_playing(qtbot):
     window.bot_client = FakeClient()
     window._update_client = lambda: None
 
-    window.refresh_player_status()
+    window.refresh_software_status()
 
-    assert window.player_page.player_status_label.text() == "Active"
-    assert window.player_page.playback_status_label.text() == "Playing"
-    assert window.player_page.now_playing_label.text() == "Test Video"
+    assert window.software_page.bot_status_label.text() == "Online"
+    assert window.software_page.bot_version_label.text() == "0.1.0"
+    assert window.software_page.manager_table.rowCount() == 1
+    assert (
+        window.software_page.manager_table.item(0, 0).text()
+        == "Steve"
+    )
+    assert window.software_page.player_table.rowCount() == 1
+    assert (
+        window.software_page.player_table.item(0, 3).text()
+        == "Playing"
+    )
+    assert (
+        window.software_page.player_table.item(0, 4).text()
+        == "Test Video"
+    )
 
 
-def test_refresh_player_status_offline_and_idle(qtbot):
+def test_refresh_software_status_handles_empty_roster(qtbot):
     window = ManagerWindow()
     qtbot.addWidget(window)
 
     class FakeClient:
-        def player_status(self):
+        def software_status(self):
             return {
-                "active": False,
-                "last_heartbeat": None,
-                "timeout_seconds": 15,
+                "bot": {
+                    "status": "online",
+                    "version": "0.1.0",
+                    "api_version": "0.1",
+                },
+                "managers": [],
+                "players": [],
             }
 
         def player_state(self):
@@ -202,11 +239,11 @@ def test_refresh_player_status_offline_and_idle(qtbot):
     window.bot_client = FakeClient()
     window._update_client = lambda: None
 
-    window.refresh_player_status()
+    window.refresh_software_status()
 
-    assert window.player_page.player_status_label.text() == "Offline"
-    assert window.player_page.playback_status_label.text() == "Idle"
-    assert window.player_page.now_playing_label.text() == "None"
+    assert window.software_page.bot_status_label.text() == "Online"
+    assert window.software_page.manager_table.rowCount() == 0
+    assert window.software_page.player_table.rowCount() == 0
 
 
 def test_window_has_queue_controls(qtbot):
@@ -625,7 +662,7 @@ def test_dark_mode_toggle_changes_stylesheet(qtbot):
     assert window.status_label.text() == "Dark mode disabled."
 
 
-def test_window_schedules_initial_player_refresh(qtbot, monkeypatch):
+def test_window_schedules_initial_software_refresh(qtbot, monkeypatch):
     scheduled = []
 
     monkeypatch.setattr(
@@ -646,7 +683,7 @@ def test_window_schedules_initial_player_refresh(qtbot, monkeypatch):
     assert scheduled[1][1].__self__ is window
     assert (
         scheduled[1][1].__func__
-        is ManagerWindow.refresh_player_status
+        is ManagerWindow.refresh_software_status
     )
 
     assert scheduled[2][0] == 0

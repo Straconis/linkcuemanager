@@ -319,6 +319,37 @@ def test_validation_error_does_not_expose_request_input():
     assert secret not in (error.detail or "")
 
 
+def test_software_status():
+    payload = {
+        "bot": {
+            "status": "online",
+            "version": "0.1.0",
+            "api_version": "0.1",
+        },
+        "managers": [
+            {
+                "display_name": "Steve",
+                "version": "0.1.0",
+                "client_id": "manager-example",
+            }
+        ],
+        "players": [],
+    }
+
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.path == "/software/status"
+
+        return httpx.Response(
+            200,
+            json=payload,
+        )
+
+    client = make_client(handler)
+
+    assert client.software_status() == payload
+
+
 def test_player_status():
     def handler(request):
         assert request.method == "GET"

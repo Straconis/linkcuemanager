@@ -335,6 +335,19 @@ class BotClient:
 
         return result
 
+    def software_status(self) -> dict:
+        result = self._request(
+            "GET",
+            "/software/status",
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid software status"
+            )
+
+        return result
+
     def player_status(self) -> dict:
         return self._request("GET", "/player/status")
 
