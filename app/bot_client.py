@@ -89,8 +89,25 @@ class BotClient:
                 body = exc.response.json()
                 if isinstance(body, dict):
                     raw_detail = body.get("detail")
-                    if raw_detail is not None:
-                        detail = str(raw_detail)
+
+                    if isinstance(raw_detail, str):
+                        detail = raw_detail
+
+                    elif isinstance(raw_detail, list):
+                        messages = []
+
+                        for item in raw_detail:
+                            if not isinstance(item, dict):
+                                continue
+
+                            message = item.get("msg")
+                            if isinstance(message, str):
+                                message = message.strip()
+                                if message:
+                                    messages.append(message)
+
+                        if messages:
+                            detail = "; ".join(messages)
             except (ValueError, TypeError):
                 pass
 

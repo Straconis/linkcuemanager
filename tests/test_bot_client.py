@@ -206,6 +206,35 @@ def test_http_error_becomes_bot_client_error():
         client.health()
 
 
+def test_validation_error_does_not_expose_request_input():
+    secret = "do-not-leak-this-secret"
+
+    def handler(request):
+        return httpx.Response(
+            422,
+            json={
+                "detail": [
+                    {
+                        "type": "model_attributes_type",
+                        "loc": ["body"],
+                        "msg": "Input should be a valid dictionary or object",
+                        "input": secret,
+                    }
+                ]
+            },
+        )
+
+    client = make_client(handler)
+
+    with pytest.raises(BotClientError) as exc_info:
+        client.health()
+
+    error = exc_info.value
+
+    assert secret not in str(error)
+    assert secret not in (error.detail or "")
+
+
 def test_player_status():
     def handler(request):
         assert request.method == "GET"
