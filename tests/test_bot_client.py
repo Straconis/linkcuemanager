@@ -319,6 +319,246 @@ def test_validation_error_does_not_expose_request_input():
     assert secret not in (error.detail or "")
 
 
+def test_list_bans():
+    seen = []
+
+    def handler(request):
+        seen.append(
+            (
+                request.method,
+                request.url.path,
+                request.url.params.get(
+                    "include_inactive"
+                ),
+            )
+        )
+
+        return httpx.Response(
+            200,
+            json=[],
+        )
+
+    client = make_client(handler)
+
+    assert client.creator_bans(
+        include_inactive=True
+    ) == []
+    assert client.video_bans(
+        include_inactive=True
+    ) == []
+
+    assert seen == [
+        (
+            "GET",
+            "/bans/creators",
+            "true",
+        ),
+        (
+            "GET",
+            "/bans/videos",
+            "true",
+        ),
+    ]
+
+
+def test_manage_creator_bans():
+    requests = []
+
+    def handler(request):
+        body = (
+            json.loads(request.content)
+            if request.content
+            else None
+        )
+        requests.append(
+            (
+                request.method,
+                request.url.path,
+                body,
+            )
+        )
+
+        if request.method == "POST":
+            return httpx.Response(
+                201,
+                json={"ban_id": 12},
+            )
+
+        if request.method == "PATCH":
+            return httpx.Response(
+                200,
+                json={
+                    "ban_id": 12,
+                    "active": False,
+                    "changed": True,
+                },
+            )
+
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "action": "banned",
+                    "actor": "manager-example",
+                }
+            ],
+        )
+
+    client = make_client(handler)
+
+    assert client.add_creator_ban(
+        platform="youtube",
+        video_creator_id="UC_TEST",
+        video_channel="Test Channel",
+        reason="Repeated submissions",
+    ) == {
+        "ban_id": 12,
+    }
+
+    assert client.set_creator_ban_active(
+        12,
+        active=False,
+        reason="Appeal accepted",
+    ) == {
+        "ban_id": 12,
+        "active": False,
+        "changed": True,
+    }
+
+    assert client.creator_ban_audit(12) == [
+        {
+            "action": "banned",
+            "actor": "manager-example",
+        }
+    ]
+
+    assert requests == [
+        (
+            "POST",
+            "/bans/creators",
+            {
+                "platform": "youtube",
+                "video_creator_id": "UC_TEST",
+                "video_channel": "Test Channel",
+                "reason": "Repeated submissions",
+            },
+        ),
+        (
+            "PATCH",
+            "/bans/creators/12",
+            {
+                "active": False,
+                "reason": "Appeal accepted",
+            },
+        ),
+        (
+            "GET",
+            "/bans/creators/12/audit",
+            None,
+        ),
+    ]
+
+
+def test_manage_video_bans():
+    requests = []
+
+    def handler(request):
+        body = (
+            json.loads(request.content)
+            if request.content
+            else None
+        )
+        requests.append(
+            (
+                request.method,
+                request.url.path,
+                body,
+            )
+        )
+
+        if request.method == "POST":
+            return httpx.Response(
+                201,
+                json={"ban_id": 21},
+            )
+
+        if request.method == "PATCH":
+            return httpx.Response(
+                200,
+                json={
+                    "ban_id": 21,
+                    "active": True,
+                    "changed": True,
+                },
+            )
+
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "action": "rebanned",
+                    "actor": "manager-example",
+                }
+            ],
+        )
+
+    client = make_client(handler)
+
+    assert client.add_video_ban(
+        platform="youtube",
+        video_platform_id="video123",
+        title="Test Video",
+        url="https://youtu.be/video123",
+        reason="Blocked video",
+    ) == {
+        "ban_id": 21,
+    }
+
+    assert client.set_video_ban_active(
+        21,
+        active=True,
+        reason="Ban restored",
+    ) == {
+        "ban_id": 21,
+        "active": True,
+        "changed": True,
+    }
+
+    assert client.video_ban_audit(21) == [
+        {
+            "action": "rebanned",
+            "actor": "manager-example",
+        }
+    ]
+
+    assert requests == [
+        (
+            "POST",
+            "/bans/videos",
+            {
+                "platform": "youtube",
+                "video_platform_id": "video123",
+                "title": "Test Video",
+                "url": "https://youtu.be/video123",
+                "reason": "Blocked video",
+            },
+        ),
+        (
+            "PATCH",
+            "/bans/videos/21",
+            {
+                "active": True,
+                "reason": "Ban restored",
+            },
+        ),
+        (
+            "GET",
+            "/bans/videos/21/audit",
+            None,
+        ),
+    ]
+
+
 def test_software_status():
     payload = {
         "bot": {

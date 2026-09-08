@@ -45,6 +45,14 @@ from app.queue_event_listener import (
     websocket_events_url,
 )
 from app.pages.about_page import build_about_page
+from app.pages.ban_dialogs import (
+    AuditHistoryDialog,
+    CreatorBanDialog,
+    VideoBanDialog,
+)
+from app.pages.ban_management_page import (
+    BanManagementPage,
+)
 from app.pages.add_video_dialog import AddVideoDialog
 from app.pages.bot_page import BotPage
 from app.pages.queue_page import QueuePage
@@ -168,6 +176,7 @@ class ManagerWindow(QMainWindow):
             ("streamer", "Streamer"),
             ("twitch", "Twitch"),
             ("software", "Software"),
+            ("bans", "Bans"),
             ("about", "About"),
         ):
             button = QPushButton(label)
@@ -309,6 +318,16 @@ class ManagerWindow(QMainWindow):
             self.refresh_software_status
         )
 
+        self.ban_page = BanManagementPage(
+            self.refresh_bans,
+            self.show_add_creator_ban_dialog,
+            self.change_selected_creator_ban_state,
+            self.show_creator_ban_audit,
+            self.show_add_video_ban_dialog,
+            self.change_selected_video_ban_state,
+            self.show_video_ban_audit,
+        )
+
         self.streamer_page = StreamerPage(
             self.save_streamer_settings
         )
@@ -322,6 +341,7 @@ class ManagerWindow(QMainWindow):
             self.streamer_page,
             self.twitch_page,
             self.software_page,
+            self.ban_page,
             self.about_page,
         ):
             self.page_stack.addWidget(page)
@@ -359,8 +379,14 @@ class ManagerWindow(QMainWindow):
         self.navigation_buttons["software"].clicked.connect(
             lambda: self.refresh_software_status()
         )
+        self.navigation_buttons["bans"].clicked.connect(
+            lambda: self._show_page(6, "bans")
+        )
+        self.navigation_buttons["bans"].clicked.connect(
+            lambda: self.refresh_bans()
+        )
         self.navigation_buttons["about"].clicked.connect(
-            lambda: self._show_page(6, "about")
+            lambda: self._show_page(7, "about")
         )
 
         self._show_page(0, "queue")
@@ -709,6 +735,48 @@ class ManagerWindow(QMainWindow):
                     font-size: 11px;
                 }
 
+                QCheckBox,
+                QLabel#fullBanHistoryLabel {
+                    color: #dce3ec;
+                    spacing: 7px;
+                }
+
+                QCheckBox:disabled {
+                    color: #697587;
+                }
+
+                QTabWidget::pane {
+                    background-color: #111318;
+                    border: 1px solid #2d3542;
+                    border-radius: 8px;
+                    top: -1px;
+                }
+
+                QTabBar::tab {
+                    background-color: #1a1f27;
+                    color: #aeb9c8;
+                    border: 1px solid #2d3542;
+                    border-bottom: none;
+                    padding: 8px 14px;
+                    margin-right: 3px;
+                }
+
+                QTabBar::tab:selected {
+                    background-color: #243c62;
+                    color: #ffffff;
+                }
+
+                QTabBar::tab:hover:!selected {
+                    background-color: #222936;
+                    color: #ffffff;
+                }
+
+                QWidget#creatorBanTab,
+                QWidget#videoBanTab {
+                    background-color: #111318;
+                    color: #e7ebf1;
+                }
+
                 QTableWidget {
                     background-color: #12151a;
                     alternate-background-color: #151920;
@@ -1028,6 +1096,48 @@ class ManagerWindow(QMainWindow):
                 /* -----------------------------------------------------
                    Tables
                    ----------------------------------------------------- */
+
+                QCheckBox,
+                QLabel#fullBanHistoryLabel {
+                    color: #273343;
+                    spacing: 7px;
+                }
+
+                QCheckBox:disabled {
+                    color: #8995a5;
+                }
+
+                QTabWidget::pane {
+                    background-color: #f4f6f9;
+                    border: 1px solid #d5dce6;
+                    border-radius: 8px;
+                    top: -1px;
+                }
+
+                QTabBar::tab {
+                    background-color: #e8edf3;
+                    color: #526174;
+                    border: 1px solid #ccd4df;
+                    border-bottom: none;
+                    padding: 8px 14px;
+                    margin-right: 3px;
+                }
+
+                QTabBar::tab:selected {
+                    background-color: #ffffff;
+                    color: #1f4f86;
+                }
+
+                QTabBar::tab:hover:!selected {
+                    background-color: #dce7f4;
+                    color: #1f4f86;
+                }
+
+                QWidget#creatorBanTab,
+                QWidget#videoBanTab {
+                    background-color: #f4f6f9;
+                    color: #273343;
+                }
 
                 QTableWidget {
                     background-color: #ffffff;
@@ -1729,6 +1839,250 @@ class ManagerWindow(QMainWindow):
         self.status_label.setText(
             f"Bot restart failed: {message}"
         )
+
+    def refresh_bans(self, *_args) -> None:
+        self._update_client()
+
+        include_inactive = (
+            self.ban_page
+            .include_inactive_toggle
+            .isChecked()
+        )
+
+        try:
+            creators = self.bot_client.creator_bans(
+                include_inactive=include_inactive
+            )
+            videos = self.bot_client.video_bans(
+                include_inactive=include_inactive
+            )
+        except BotClientError as exc:
+            self.ban_page.show_unavailable()
+            self._show_error(exc)
+            return
+
+        self.ban_page.apply_bans(
+            creators=creators,
+            videos=videos,
+        )
+
+        self.status_label.setText(
+            "Bans refreshed."
+        )
+
+    def show_add_creator_ban_dialog(self) -> None:
+        dialog = CreatorBanDialog(self)
+
+        if (
+            dialog.exec()
+            != dialog.DialogCode.Accepted
+        ):
+            return
+
+        values = dialog.values()
+        self._update_client()
+
+        try:
+            self.bot_client.add_creator_ban(
+                **values
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self.refresh_bans()
+        self.status_label.setText(
+            "Creator ban added."
+        )
+
+    def show_add_video_ban_dialog(self) -> None:
+        dialog = VideoBanDialog(self)
+
+        if (
+            dialog.exec()
+            != dialog.DialogCode.Accepted
+        ):
+            return
+
+        values = dialog.values()
+        self._update_client()
+
+        try:
+            self.bot_client.add_video_ban(
+                **values
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self.refresh_bans()
+        self.status_label.setText(
+            "Video ban added."
+        )
+
+    def change_selected_creator_ban_state(
+        self,
+    ) -> None:
+        selected = (
+            self.ban_page.selected_creator_ban()
+        )
+
+        if selected is None:
+            self.status_label.setText(
+                "Select a creator ban first."
+            )
+            return
+
+        ban_id, currently_active = selected
+        new_active = not currently_active
+        action = (
+            "Re-ban"
+            if new_active
+            else "Unban"
+        )
+
+        reason, accepted = QInputDialog.getText(
+            self,
+            f"{action} Creator",
+            f"{action} reason (optional):",
+        )
+
+        if not accepted:
+            return
+
+        self._update_client()
+
+        try:
+            self.bot_client.set_creator_ban_active(
+                ban_id,
+                active=new_active,
+                reason=reason.strip() or None,
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self.refresh_bans()
+        self.status_label.setText(
+            (
+                "Creator re-banned."
+                if new_active
+                else "Creator unbanned."
+            )
+        )
+
+    def change_selected_video_ban_state(
+        self,
+    ) -> None:
+        selected = (
+            self.ban_page.selected_video_ban()
+        )
+
+        if selected is None:
+            self.status_label.setText(
+                "Select a video ban first."
+            )
+            return
+
+        ban_id, currently_active = selected
+        new_active = not currently_active
+        action = (
+            "Re-ban"
+            if new_active
+            else "Unban"
+        )
+
+        reason, accepted = QInputDialog.getText(
+            self,
+            f"{action} Video",
+            f"{action} reason (optional):",
+        )
+
+        if not accepted:
+            return
+
+        self._update_client()
+
+        try:
+            self.bot_client.set_video_ban_active(
+                ban_id,
+                active=new_active,
+                reason=reason.strip() or None,
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self.refresh_bans()
+        self.status_label.setText(
+            (
+                "Video re-banned."
+                if new_active
+                else "Video unbanned."
+            )
+        )
+
+    def show_creator_ban_audit(self) -> None:
+        selected = (
+            self.ban_page.selected_creator_ban()
+        )
+
+        if selected is None:
+            self.status_label.setText(
+                "Select a creator ban first."
+            )
+            return
+
+        ban_id, _ = selected
+        self._update_client()
+
+        try:
+            entries = (
+                self.bot_client.creator_ban_audit(
+                    ban_id
+                )
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        dialog = AuditHistoryDialog(
+            "Creator Ban Audit",
+            entries,
+            self,
+        )
+        dialog.exec()
+
+    def show_video_ban_audit(self) -> None:
+        selected = (
+            self.ban_page.selected_video_ban()
+        )
+
+        if selected is None:
+            self.status_label.setText(
+                "Select a video ban first."
+            )
+            return
+
+        ban_id, _ = selected
+        self._update_client()
+
+        try:
+            entries = (
+                self.bot_client.video_ban_audit(
+                    ban_id
+                )
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        dialog = AuditHistoryDialog(
+            "Video Ban Audit",
+            entries,
+            self,
+        )
+        dialog.exec()
 
     def refresh_software_status(self) -> None:
         self._update_client()

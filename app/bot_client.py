@@ -46,6 +46,7 @@ class BotClient:
         path: str,
         *,
         json_body: dict | None = None,
+        params: dict[str, str] | None = None,
     ) -> dict | list:
         try:
             with self._client() as client:
@@ -79,6 +80,7 @@ class BotClient:
                     path,
                     content=body if body else None,
                     headers=headers,
+                    params=params,
                 )
                 response.raise_for_status()
                 return response.json()
@@ -331,6 +333,186 @@ class BotClient:
         if not isinstance(result, dict):
             raise BotClientError(
                 "Bot returned an invalid public web setting"
+            )
+
+        return result
+
+    def creator_bans(
+        self,
+        *,
+        include_inactive: bool = True,
+    ) -> list[dict]:
+        result = self._request(
+            "GET",
+            "/bans/creators",
+            params={
+                "include_inactive": (
+                    "true"
+                    if include_inactive
+                    else "false"
+                ),
+            },
+        )
+
+        if not isinstance(result, list):
+            raise BotClientError(
+                "Bot returned an invalid creator ban list"
+            )
+
+        return result
+
+    def add_creator_ban(
+        self,
+        *,
+        platform: str,
+        video_creator_id: str | None,
+        video_channel: str,
+        reason: str | None = None,
+    ) -> dict:
+        result = self._request(
+            "POST",
+            "/bans/creators",
+            json_body={
+                "platform": platform,
+                "video_creator_id": video_creator_id,
+                "video_channel": video_channel,
+                "reason": reason,
+            },
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid creator ban response"
+            )
+
+        return result
+
+    def set_creator_ban_active(
+        self,
+        ban_id: int,
+        *,
+        active: bool,
+        reason: str | None = None,
+    ) -> dict:
+        result = self._request(
+            "PATCH",
+            f"/bans/creators/{ban_id}",
+            json_body={
+                "active": active,
+                "reason": reason,
+            },
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid creator ban update"
+            )
+
+        return result
+
+    def creator_ban_audit(
+        self,
+        ban_id: int,
+    ) -> list[dict]:
+        result = self._request(
+            "GET",
+            f"/bans/creators/{ban_id}/audit",
+        )
+
+        if not isinstance(result, list):
+            raise BotClientError(
+                "Bot returned invalid creator ban history"
+            )
+
+        return result
+
+    def video_bans(
+        self,
+        *,
+        include_inactive: bool = True,
+    ) -> list[dict]:
+        result = self._request(
+            "GET",
+            "/bans/videos",
+            params={
+                "include_inactive": (
+                    "true"
+                    if include_inactive
+                    else "false"
+                ),
+            },
+        )
+
+        if not isinstance(result, list):
+            raise BotClientError(
+                "Bot returned an invalid video ban list"
+            )
+
+        return result
+
+    def add_video_ban(
+        self,
+        *,
+        platform: str,
+        video_platform_id: str,
+        title: str | None = None,
+        url: str | None = None,
+        reason: str | None = None,
+    ) -> dict:
+        result = self._request(
+            "POST",
+            "/bans/videos",
+            json_body={
+                "platform": platform,
+                "video_platform_id": video_platform_id,
+                "title": title,
+                "url": url,
+                "reason": reason,
+            },
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid video ban response"
+            )
+
+        return result
+
+    def set_video_ban_active(
+        self,
+        ban_id: int,
+        *,
+        active: bool,
+        reason: str | None = None,
+    ) -> dict:
+        result = self._request(
+            "PATCH",
+            f"/bans/videos/{ban_id}",
+            json_body={
+                "active": active,
+                "reason": reason,
+            },
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid video ban update"
+            )
+
+        return result
+
+    def video_ban_audit(
+        self,
+        ban_id: int,
+    ) -> list[dict]:
+        result = self._request(
+            "GET",
+            f"/bans/videos/{ban_id}/audit",
+        )
+
+        if not isinstance(result, list):
+            raise BotClientError(
+                "Bot returned invalid video ban history"
             )
 
         return result
