@@ -641,6 +641,62 @@ class BotClient:
             "/twitch/auth/authorize",
         )
 
+    def twitch_broadcaster_auth_status(self) -> dict:
+        result = self._request(
+            "GET",
+            "/twitch/broadcaster/auth/status",
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid streamer "
+                "authorization status"
+            )
+
+        return result
+
+    def authorize_twitch_broadcaster(self) -> dict:
+        result = self._request(
+            "POST",
+            "/twitch/broadcaster/auth/authorize",
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid streamer "
+                "authorization response"
+            )
+
+        return result
+
+    def twitch_broadcaster_auth_status(self) -> dict:
+        result = self._request(
+            "GET",
+            "/twitch/broadcaster/auth/status",
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid streamer "
+                "authorization status"
+            )
+
+        return result
+
+    def authorize_twitch_broadcaster(self) -> dict:
+        result = self._request(
+            "POST",
+            "/twitch/broadcaster/auth/authorize",
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid streamer "
+                "authorization response"
+            )
+
+        return result
+
     def twitch_status(self) -> dict:
         return self._request("GET", "/twitch/status")
 

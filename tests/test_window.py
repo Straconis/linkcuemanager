@@ -1,3 +1,4 @@
+from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableWidgetItem
 
@@ -2906,3 +2907,92 @@ def test_save_streamer_settings_does_not_persist_local_state_when_bot_save_fails
 
     assert saved_manager_settings == []
 
+def test_generate_streamer_authorization_link_copies_url(
+    qtbot,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    authorization_url = (
+        "https://id.twitch.tv/oauth2/authorize"
+        "?client_id=test"
+    )
+
+    class FakeClient:
+        def authorize_twitch_broadcaster(self):
+            return {
+                "authorization_url": authorization_url,
+            }
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+    QApplication.clipboard().clear()
+
+    window.generate_streamer_authorization_link()
+
+    assert (
+        window.streamer_page
+        .streamer_authorization_link()
+        == authorization_url
+    )
+    assert (
+        QApplication.clipboard().text()
+        == authorization_url
+    )
+    assert (
+        "generated and copied"
+        in window.status_label.text().lower()
+    )
+
+
+def test_copy_streamer_authorization_link(
+    qtbot,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    authorization_url = (
+        "https://id.twitch.tv/oauth2/authorize"
+        "?client_id=test"
+    )
+
+    window.streamer_page.set_streamer_authorization_link(
+        authorization_url
+    )
+    QApplication.clipboard().clear()
+
+    window.copy_streamer_authorization_link()
+
+    assert (
+        QApplication.clipboard().text()
+        == authorization_url
+    )
+    assert (
+        window.status_label.text()
+        == "Streamer authorization link copied."
+    )
+
+
+def test_refresh_streamer_authorization_status(
+    qtbot,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    class FakeClient:
+        def twitch_broadcaster_auth_status(self):
+            return {
+                "authorized": True,
+                "login": "smokeeeg",
+            }
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+
+    window.refresh_streamer_authorization_status()
+
+    assert (
+        window.streamer_page
+        .streamer_auth_status_label.text()
+        == "Streamer channel: Authorized as smokeeeg"
+    )

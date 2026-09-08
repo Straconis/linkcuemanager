@@ -18,6 +18,9 @@ class StreamerPage(QWidget):
     def __init__(
         self,
         save_callback: Callable[[], None],
+        authorize_twitch_callback: Callable[[], None],
+        generate_streamer_auth_callback: Callable[[], None],
+        copy_streamer_auth_callback: Callable[[], None],
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -142,7 +145,84 @@ class StreamerPage(QWidget):
 
         streamer_layout.addLayout(populate_row)
 
+        self.streamer_auth_status_label = QLabel(
+            "Streamer channel: Not authorized"
+        )
+        self.streamer_auth_status_label.setObjectName(
+            "streamerAuthorizationStatus"
+        )
+        streamer_layout.addWidget(
+            self.streamer_auth_status_label
+        )
+
+        auth_link_row = QHBoxLayout()
+
+        self.streamer_auth_link_input = QLineEdit()
+        self.streamer_auth_link_input.setObjectName(
+            "streamerAuthorizationLink"
+        )
+        self.streamer_auth_link_input.setReadOnly(True)
+        self.streamer_auth_link_input.setPlaceholderText(
+            "Generate a link to send to the streamer"
+        )
+
+        self.generate_streamer_auth_link_button = QPushButton(
+            "Generate Streamer Authorization Link"
+        )
+        self.generate_streamer_auth_link_button.setObjectName(
+            "generateStreamerAuthorizationLinkButton"
+        )
+        self.generate_streamer_auth_link_button.setToolTip(
+            "Create a secure Twitch authorization link "
+            "to send to the streamer."
+        )
+        self.generate_streamer_auth_link_button.clicked.connect(
+            generate_streamer_auth_callback
+        )
+
+        self.copy_streamer_auth_link_button = QPushButton(
+            "Copy Link"
+        )
+        self.copy_streamer_auth_link_button.setObjectName(
+            "copyStreamerAuthorizationLinkButton"
+        )
+        self.copy_streamer_auth_link_button.setEnabled(False)
+        self.copy_streamer_auth_link_button.clicked.connect(
+            copy_streamer_auth_callback
+        )
+
+        auth_link_row.addWidget(
+            self.streamer_auth_link_input,
+            1,
+        )
+        auth_link_row.addWidget(
+            self.generate_streamer_auth_link_button
+        )
+        auth_link_row.addWidget(
+            self.copy_streamer_auth_link_button
+        )
+
+        streamer_layout.addLayout(auth_link_row)
+
         button_row = QHBoxLayout()
+
+        self.authorize_twitch_button = QPushButton(
+            "Authorize LinkCue Bot Account"
+        )
+        self.authorize_twitch_button.setObjectName(
+            "authorizeBotWithTwitchButton"
+        )
+        self.authorize_twitch_button.setToolTip(
+            "Testing and maintenance only: authorize while "
+            "signed into the LinkCue Twitch account."
+        )
+        self.authorize_twitch_button.clicked.connect(
+            authorize_twitch_callback
+        )
+
+        button_row.addWidget(
+            self.authorize_twitch_button
+        )
         button_row.addStretch()
 
         self.save_settings_button = QPushButton(
@@ -174,6 +254,40 @@ class StreamerPage(QWidget):
         )
 
         self._apply_populate_mode()
+
+    def set_streamer_authorization_link(
+        self,
+        authorization_url: str,
+    ) -> None:
+        normalized = authorization_url.strip()
+
+        self.streamer_auth_link_input.setText(
+            normalized
+        )
+        self.copy_streamer_auth_link_button.setEnabled(
+            bool(normalized)
+        )
+
+    def streamer_authorization_link(self) -> str:
+        return self.streamer_auth_link_input.text().strip()
+
+    def set_streamer_authorization_status(
+        self,
+        *,
+        authorized: bool,
+        login: str | None,
+    ) -> None:
+        normalized_login = (login or "").strip().lower()
+
+        if authorized and normalized_login:
+            text = (
+                "Streamer channel: Authorized as "
+                f"{normalized_login}"
+            )
+        else:
+            text = "Streamer channel: Not authorized"
+
+        self.streamer_auth_status_label.setText(text)
 
     def streamer_name(self) -> str:
         return self.streamer_name_input.text().strip()

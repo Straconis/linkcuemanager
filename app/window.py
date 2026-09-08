@@ -5,6 +5,7 @@ from PySide6.QtCore import QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from datetime import datetime
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -329,7 +330,10 @@ class ManagerWindow(QMainWindow):
         )
 
         self.streamer_page = StreamerPage(
-            self.save_streamer_settings
+            self.save_streamer_settings,
+            self.authorize_twitch,
+            self.generate_streamer_authorization_link,
+            self.copy_streamer_authorization_link,
         )
 
         self.about_page = build_about_page()
@@ -2192,6 +2196,88 @@ class ManagerWindow(QMainWindow):
         self.status_label.setText(
             "Streamer Twitch settings refreshed."
         )
+    def generate_streamer_authorization_link(
+        self,
+    ) -> None:
+        self._update_client()
+
+        try:
+            result = (
+                self.bot_client
+                .authorize_twitch_broadcaster()
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        authorization_url = str(
+            result.get("authorization_url", "")
+        ).strip()
+
+        if not authorization_url:
+            self.status_label.setText(
+                "Bot did not provide a streamer "
+                "authorization URL."
+            )
+            return
+
+        self.streamer_page.set_streamer_authorization_link(
+            authorization_url
+        )
+        QApplication.clipboard().setText(
+            authorization_url
+        )
+
+        self.status_label.setText(
+            "Streamer authorization link generated "
+            "and copied. Send it to the streamer."
+        )
+
+    def copy_streamer_authorization_link(
+        self,
+    ) -> None:
+        authorization_url = (
+            self.streamer_page
+            .streamer_authorization_link()
+        )
+
+        if not authorization_url:
+            self.status_label.setText(
+                "Generate a streamer authorization "
+                "link before copying it."
+            )
+            return
+
+        QApplication.clipboard().setText(
+            authorization_url
+        )
+
+        self.status_label.setText(
+            "Streamer authorization link copied."
+        )
+
+    def refresh_streamer_authorization_status(
+        self,
+        *,
+        show_error: bool = True,
+    ) -> None:
+        self._update_client()
+
+        try:
+            result = (
+                self.bot_client
+                .twitch_broadcaster_auth_status()
+            )
+        except BotClientError as exc:
+            if show_error:
+                self._show_error(exc)
+            return
+
+        self.streamer_page.set_streamer_authorization_status(
+            authorized=bool(result.get("authorized")),
+            login=result.get("login"),
+        )
+
     def authorize_twitch(self) -> None:
         self._update_client()
 

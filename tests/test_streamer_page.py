@@ -1,8 +1,18 @@
 from app.pages.streamer_page import StreamerPage
 
 
-def _build_page(qtbot):
-    page = StreamerPage(lambda: None)
+def _build_page(
+    qtbot,
+    authorize_callback=lambda: None,
+    generate_callback=lambda: None,
+    copy_callback=lambda: None,
+):
+    page = StreamerPage(
+        lambda: None,
+        authorize_callback,
+        generate_callback,
+        copy_callback,
+    )
     qtbot.addWidget(page)
     return page
 
@@ -19,6 +29,26 @@ def test_streamer_twitch_settings_controls_are_available(qtbot):
     )
     assert hasattr(page, "populate_channel_from_url_toggle")
     assert hasattr(page, "save_settings_button")
+
+
+def test_authorize_linkcue_bot_account_button(qtbot):
+    authorizations = []
+
+    page = _build_page(
+        qtbot,
+        authorize_callback=(
+            lambda: authorizations.append(True)
+        ),
+    )
+
+    assert (
+        page.authorize_twitch_button.text()
+        == "Authorize LinkCue Bot Account"
+    )
+
+    page.authorize_twitch_button.click()
+
+    assert authorizations == [True]
 
 
 def test_streamer_twitch_auto_population_defaults_on(qtbot):
@@ -218,3 +248,61 @@ def test_loading_auto_name_without_url_preserves_saved_name(
     )
     assert page.streamer_name_input.isReadOnly() is True
 
+def test_streamer_authorization_link_controls(qtbot):
+    generated = []
+    copied = []
+
+    page = _build_page(
+        qtbot,
+        generate_callback=lambda: generated.append(True),
+        copy_callback=lambda: copied.append(True),
+    )
+
+    assert (
+        page.generate_streamer_auth_link_button.text()
+        == "Generate Streamer Authorization Link"
+    )
+    assert page.copy_streamer_auth_link_button.text() == "Copy Link"
+    assert page.streamer_auth_link_input.isReadOnly() is True
+    assert page.copy_streamer_auth_link_button.isEnabled() is False
+
+    page.generate_streamer_auth_link_button.click()
+
+    assert generated == [True]
+
+    page.set_streamer_authorization_link(
+        "https://example.test/authorize"
+    )
+
+    assert page.streamer_authorization_link() == (
+        "https://example.test/authorize"
+    )
+    assert page.copy_streamer_auth_link_button.isEnabled() is True
+
+    page.copy_streamer_auth_link_button.click()
+
+    assert copied == [True]
+
+
+def test_streamer_authorization_status(qtbot):
+    page = _build_page(qtbot)
+
+    page.set_streamer_authorization_status(
+        authorized=False,
+        login=None,
+    )
+
+    assert (
+        page.streamer_auth_status_label.text()
+        == "Streamer channel: Not authorized"
+    )
+
+    page.set_streamer_authorization_status(
+        authorized=True,
+        login="smokeeeg",
+    )
+
+    assert (
+        page.streamer_auth_status_label.text()
+        == "Streamer channel: Authorized as smokeeeg"
+    )

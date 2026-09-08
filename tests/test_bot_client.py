@@ -986,3 +986,55 @@ def test_signed_json_request_keeps_content_type(monkeypatch):
     )
 
     assert result["code"] == "123456"
+
+def test_twitch_broadcaster_auth_status():
+    def handler(request):
+        assert request.method == "GET"
+        assert (
+            request.url.path
+            == "/twitch/broadcaster/auth/status"
+        )
+
+        return httpx.Response(
+            200,
+            json={
+                "authorized": True,
+                "user_id": "987654",
+                "login": "smokeeeg",
+            },
+        )
+
+    client = make_client(handler)
+
+    assert client.twitch_broadcaster_auth_status() == {
+        "authorized": True,
+        "user_id": "987654",
+        "login": "smokeeeg",
+    }
+
+
+def test_authorize_twitch_broadcaster():
+    def handler(request):
+        assert request.method == "POST"
+        assert (
+            request.url.path
+            == "/twitch/broadcaster/auth/authorize"
+        )
+
+        return httpx.Response(
+            200,
+            json={
+                "authorization_url": (
+                    "https://example.test/"
+                    "twitch/broadcaster/oauth"
+                ),
+            },
+        )
+
+    client = make_client(handler)
+
+    assert client.authorize_twitch_broadcaster() == {
+        "authorization_url": (
+            "https://example.test/twitch/broadcaster/oauth"
+        ),
+    }
