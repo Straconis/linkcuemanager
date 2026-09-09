@@ -334,6 +334,15 @@ class ManagerWindow(QMainWindow):
             self.authorize_twitch,
             self.generate_streamer_authorization_link,
             self.copy_streamer_authorization_link,
+            refresh_master_callback=(
+                self.refresh_master_player_status
+            ),
+            force_release_master_callback=(
+                self.force_release_master_player
+            ),
+            reset_streamer_sync_callback=(
+                self.reset_streamer_sync_password
+            ),
         )
 
         self.about_page = build_about_page()
@@ -2196,6 +2205,178 @@ class ManagerWindow(QMainWindow):
         self.status_label.setText(
             "Streamer Twitch settings refreshed."
         )
+    def refresh_master_player_status(
+        self,
+        *,
+        show_error: bool = True,
+    ) -> None:
+        channel = (
+            self.streamer_page.configured_channel()
+            .strip()
+            .lower()
+            .lstrip("#")
+        )
+
+        if not channel:
+            self.streamer_page.set_master_player_status_message(
+                "Master Player: Configure a Twitch channel first"
+            )
+            return
+
+        self._update_client()
+
+        try:
+            result = self.bot_client.player_master_status(
+                channel
+            )
+        except BotClientError as exc:
+            if show_error:
+                self._show_error(exc)
+            else:
+                self.streamer_page.set_master_player_status_message(
+                    "Master Player: Status unavailable"
+                )
+            return
+
+        self.streamer_page.set_master_player_status(
+            result
+        )
+        self.status_label.setText(
+            "Master Player status refreshed."
+        )
+
+    def force_release_master_player(self) -> None:
+        channel = (
+            self.streamer_page.configured_channel()
+            .strip()
+            .lower()
+            .lstrip("#")
+        )
+
+        if not channel:
+            self.status_label.setText(
+                "Configure a Twitch channel before "
+                "releasing its master Player."
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Force Release Master Player",
+            "Force release the active master Player "
+            f"for {channel}?",
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self._update_client()
+
+        try:
+            result = (
+                self.bot_client
+                .force_release_player_master(channel)
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self.streamer_page.set_master_player_status(
+            {
+                "active": False,
+                "channel": channel,
+            }
+        )
+
+        if result.get("status") == "released":
+            message = (
+                f"Master Player released for {channel}."
+            )
+        else:
+            message = (
+                f"No active master Player existed for {channel}."
+            )
+
+        self.status_label.setText(message)
+
+    def reset_streamer_sync_password(self) -> None:
+        current_password = (
+            self.streamer_page
+            .current_streamer_sync_password()
+        )
+        new_password = (
+            self.streamer_page
+            .new_streamer_sync_password()
+        )
+        confirmed_password = (
+            self.streamer_page
+            .confirmed_streamer_sync_password()
+        )
+
+        if not current_password.strip():
+            self.status_label.setText(
+                "Enter the current streamer sync password."
+            )
+            return
+
+        if len(new_password.strip()) < 8:
+            self.status_label.setText(
+                "The new streamer sync password must be "
+                "at least 8 characters."
+            )
+            return
+
+        if new_password != confirmed_password:
+            self.status_label.setText(
+                "The new streamer sync passwords do not match."
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Reset Streamer Sync Password",
+            "Reset the streamer sync password and revoke "
+            "every paired Player?\\n\\n"
+            "Each Player will need to pair again.",
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self._update_client()
+
+        try:
+            result = (
+                self.bot_client
+                .reset_streamer_sync_password(
+                    current_password,
+                    new_password,
+                )
+            )
+        except BotClientError as exc:
+            self._show_error(exc)
+            return
+
+        self.streamer_page.clear_streamer_sync_password_fields()
+        self.streamer_page.set_master_player_status_message(
+            "Master Player: None active"
+        )
+
+        revoked = int(
+            result.get("revoked_players") or 0
+        )
+
+        self.status_label.setText(
+            "Streamer sync password reset. "
+            f"Revoked {revoked} Player pairing(s)."
+        )
+
     def generate_streamer_authorization_link(
         self,
     ) -> None:

@@ -669,30 +669,60 @@ class BotClient:
 
         return result
 
-    def twitch_broadcaster_auth_status(self) -> dict:
+
+    def player_master_status(
+        self,
+        channel: str,
+    ) -> dict:
         result = self._request(
             "GET",
-            "/twitch/broadcaster/auth/status",
+            "/player/master",
+            params={"channel": channel.strip()},
         )
 
         if not isinstance(result, dict):
             raise BotClientError(
-                "Bot returned an invalid streamer "
-                "authorization status"
+                "Bot returned an invalid master Player status"
             )
 
         return result
 
-    def authorize_twitch_broadcaster(self) -> dict:
+    def force_release_player_master(
+        self,
+        channel: str,
+    ) -> dict:
         result = self._request(
             "POST",
-            "/twitch/broadcaster/auth/authorize",
+            "/player/master/force-release",
+            json_body={
+                "channel": channel.strip(),
+            },
         )
 
         if not isinstance(result, dict):
             raise BotClientError(
-                "Bot returned an invalid streamer "
-                "authorization response"
+                "Bot returned an invalid master release response"
+            )
+
+        return result
+
+    def reset_streamer_sync_password(
+        self,
+        current_password: str,
+        new_password: str,
+    ) -> dict:
+        result = self._request(
+            "POST",
+            "/auth/reset-streamer-sync-password",
+            json_body={
+                "current_password": current_password,
+                "new_password": new_password,
+            },
+        )
+
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid password reset response"
             )
 
         return result

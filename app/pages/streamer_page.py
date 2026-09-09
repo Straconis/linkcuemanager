@@ -22,6 +22,10 @@ class StreamerPage(QWidget):
         generate_streamer_auth_callback: Callable[[], None],
         copy_streamer_auth_callback: Callable[[], None],
         parent: QWidget | None = None,
+        *,
+        refresh_master_callback: Callable[[], None] | None = None,
+        force_release_master_callback: Callable[[], None] | None = None,
+        reset_streamer_sync_callback: Callable[[], None] | None = None,
     ):
         super().__init__(parent)
 
@@ -204,6 +208,158 @@ class StreamerPage(QWidget):
 
         streamer_layout.addLayout(auth_link_row)
 
+        master_group = QGroupBox("Master Player")
+        master_layout = QVBoxLayout(master_group)
+
+        self.master_player_status_label = QLabel(
+            "Master Player: Status not checked"
+        )
+        self.master_player_status_label.setObjectName(
+            "masterPlayerStatus"
+        )
+        self.master_player_status_label.setWordWrap(True)
+        master_layout.addWidget(
+            self.master_player_status_label
+        )
+
+        master_help = QLabel(
+            "The master Player is the only Player allowed "
+            "to register Bot-level Now Playing state for "
+            "this Twitch channel."
+        )
+        master_help.setWordWrap(True)
+        master_layout.addWidget(master_help)
+
+        master_buttons = QHBoxLayout()
+
+        self.refresh_master_status_button = QPushButton(
+            "Refresh Master Status"
+        )
+        self.refresh_master_status_button.setObjectName(
+            "refreshMasterPlayerStatusButton"
+        )
+
+        self.force_release_master_button = QPushButton(
+            "Force Release Master Player"
+        )
+        self.force_release_master_button.setObjectName(
+            "forceReleaseMasterPlayerButton"
+        )
+
+        if refresh_master_callback is not None:
+            self.refresh_master_status_button.clicked.connect(
+                refresh_master_callback
+            )
+
+        if force_release_master_callback is not None:
+            self.force_release_master_button.clicked.connect(
+                force_release_master_callback
+            )
+
+        master_buttons.addWidget(
+            self.refresh_master_status_button
+        )
+        master_buttons.addWidget(
+            self.force_release_master_button
+        )
+        master_buttons.addStretch()
+
+        master_layout.addLayout(master_buttons)
+        streamer_layout.addWidget(master_group)
+
+        password_group = QGroupBox(
+            "Streamer Sync Password"
+        )
+        password_layout = QVBoxLayout(password_group)
+
+        password_warning = QLabel(
+            "Resetting this password revokes every paired "
+            "Player and clears the active master lease. "
+            "Each Player must pair again using the new password."
+        )
+        password_warning.setWordWrap(True)
+        password_layout.addWidget(password_warning)
+
+        current_password_row = QHBoxLayout()
+        current_password_row.addWidget(
+            QLabel("Current Password:")
+        )
+
+        self.current_streamer_sync_password_input = (
+            QLineEdit()
+        )
+        self.current_streamer_sync_password_input.setObjectName(
+            "currentStreamerSyncPasswordInput"
+        )
+        self.current_streamer_sync_password_input.setEchoMode(
+            QLineEdit.EchoMode.Password
+        )
+        current_password_row.addWidget(
+            self.current_streamer_sync_password_input,
+            1,
+        )
+        password_layout.addLayout(current_password_row)
+
+        new_password_row = QHBoxLayout()
+        new_password_row.addWidget(
+            QLabel("New Password:")
+        )
+
+        self.new_streamer_sync_password_input = QLineEdit()
+        self.new_streamer_sync_password_input.setObjectName(
+            "newStreamerSyncPasswordInput"
+        )
+        self.new_streamer_sync_password_input.setEchoMode(
+            QLineEdit.EchoMode.Password
+        )
+        new_password_row.addWidget(
+            self.new_streamer_sync_password_input,
+            1,
+        )
+        password_layout.addLayout(new_password_row)
+
+        confirm_password_row = QHBoxLayout()
+        confirm_password_row.addWidget(
+            QLabel("Confirm New Password:")
+        )
+
+        self.confirm_streamer_sync_password_input = (
+            QLineEdit()
+        )
+        self.confirm_streamer_sync_password_input.setObjectName(
+            "confirmStreamerSyncPasswordInput"
+        )
+        self.confirm_streamer_sync_password_input.setEchoMode(
+            QLineEdit.EchoMode.Password
+        )
+        confirm_password_row.addWidget(
+            self.confirm_streamer_sync_password_input,
+            1,
+        )
+        password_layout.addLayout(confirm_password_row)
+
+        reset_password_row = QHBoxLayout()
+
+        self.reset_streamer_sync_password_button = QPushButton(
+            "Reset Streamer Sync Password"
+        )
+        self.reset_streamer_sync_password_button.setObjectName(
+            "resetStreamerSyncPasswordButton"
+        )
+
+        if reset_streamer_sync_callback is not None:
+            self.reset_streamer_sync_password_button.clicked.connect(
+                reset_streamer_sync_callback
+            )
+
+        reset_password_row.addWidget(
+            self.reset_streamer_sync_password_button
+        )
+        reset_password_row.addStretch()
+
+        password_layout.addLayout(reset_password_row)
+        streamer_layout.addWidget(password_group)
+
         button_row = QHBoxLayout()
 
         self.authorize_twitch_button = QPushButton(
@@ -254,6 +410,69 @@ class StreamerPage(QWidget):
         )
 
         self._apply_populate_mode()
+
+    def set_master_player_status(
+        self,
+        status: dict,
+    ) -> None:
+        active = bool(status.get("active"))
+        channel = str(
+            status.get("channel") or ""
+        ).strip()
+        owner = str(
+            status.get("display_name")
+            or status.get("client_id")
+            or ""
+        ).strip()
+
+        if active:
+            text = "Master Player: Active"
+
+            if owner:
+                text += f" - {owner}"
+
+            if channel:
+                text += f" for {channel}"
+        else:
+            text = "Master Player: None active"
+
+            if channel:
+                text += f" for {channel}"
+
+        self.master_player_status_label.setText(text)
+
+    def set_master_player_status_message(
+        self,
+        message: str,
+    ) -> None:
+        self.master_player_status_label.setText(
+            message.strip()
+        )
+
+    def current_streamer_sync_password(self) -> str:
+        return (
+            self.current_streamer_sync_password_input
+            .text()
+        )
+
+    def new_streamer_sync_password(self) -> str:
+        return (
+            self.new_streamer_sync_password_input
+            .text()
+        )
+
+    def confirmed_streamer_sync_password(self) -> str:
+        return (
+            self.confirm_streamer_sync_password_input
+            .text()
+        )
+
+    def clear_streamer_sync_password_fields(
+        self,
+    ) -> None:
+        self.current_streamer_sync_password_input.clear()
+        self.new_streamer_sync_password_input.clear()
+        self.confirm_streamer_sync_password_input.clear()
 
     def set_streamer_authorization_link(
         self,
