@@ -2594,6 +2594,10 @@ class ManagerWindow(QMainWindow):
         try:
             player_state = self.bot_client.player_state()
             items = self.bot_client.queue()
+            playback = self.bot_client.playback_setting()
+            self.queue_page.set_playback_mode(
+                playback.get("mode", "standard")
+            )
             playing_item = player_state.get("item")
             if playing_item is not None:
                 items = [playing_item, *items]
@@ -3416,6 +3420,20 @@ class ManagerWindow(QMainWindow):
             self._show_error(exc)
             return
 
+        playback_getter = getattr(
+            self.bot_client,
+            "playback_setting",
+            None,
+        )
+        if playback_getter is not None:
+            try:
+                playback = playback_getter()
+                self.queue_page.set_playback_mode(
+                    playback.get("mode", "standard")
+                )
+            except BotClientError:
+                pass
+
         self._render_queue(items)
         self.status_label.setText(
             f"History loaded: {len(items)} item(s)."
@@ -3491,9 +3509,27 @@ class ManagerWindow(QMainWindow):
             self._show_error(exc)
             return
 
+        playback_getter = getattr(
+            self.bot_client,
+            "playback_setting",
+            None,
+        )
+        if playback_getter is not None:
+            try:
+                playback = playback_getter()
+                self.queue_page.set_playback_mode(
+                    playback.get("mode", "standard")
+                )
+            except BotClientError:
+                pass
+
         self._render_queue(items)
 
     def _apply_queue_snapshot(self, snapshot: dict) -> None:
+        playback = snapshot.get("playback") or {}
+        self.queue_page.set_playback_mode(
+            playback.get("mode", "standard")
+        )
         playing = snapshot.get("playing", [])
         queued = snapshot.get("queued", [])
         items = [*playing, *queued]

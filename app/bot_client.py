@@ -160,6 +160,17 @@ class BotClient:
 
         return result
 
+    def playback_setting(self) -> dict:
+        result = self._request(
+            "GET",
+            "/settings/playback",
+        )
+        if not isinstance(result, dict):
+            raise BotClientError(
+                "Bot returned an invalid playback setting"
+            )
+        return result
+
     def add_queue_item(
         self,
         url: str,

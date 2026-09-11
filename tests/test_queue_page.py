@@ -228,6 +228,24 @@ def test_render_items_updates_total_video_count():
     assert page.video_count_label.text() == "Videos: 3"
 
 
+def test_round_robin_notice_explains_reordering():
+    page = _build_page()
+
+    page.set_playback_mode("round_robin")
+
+    assert page.playback_mode_notice.isVisible() is False
+    assert "reordering is saved" in (
+        page.playback_mode_notice.text()
+    )
+
+    page.show()
+    page.set_playback_mode("round_robin")
+    assert page.playback_mode_notice.isVisible() is True
+
+    page.set_playback_mode("standard")
+    assert page.playback_mode_notice.isVisible() is False
+
+
 
 def test_queue_search_filters_local_snapshot():
     from PySide6.QtCore import Qt

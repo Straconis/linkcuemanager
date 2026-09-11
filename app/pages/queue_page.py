@@ -686,6 +686,19 @@ class QueuePage(QWidget):
             self.queue_status_area
         )
 
+        self.playback_mode_notice = QLabel()
+        self.playback_mode_notice.setObjectName(
+            "roundRobinNotice"
+        )
+        self.playback_mode_notice.setWordWrap(True)
+        self.playback_mode_notice.setStyleSheet(
+            "background: #5b4300; color: #fff0b3; "
+            "border: 1px solid #b48700; border-radius: 6px; "
+            "padding: 8px 10px; font-weight: 600;"
+        )
+        self.playback_mode_notice.hide()
+        group_layout.addWidget(self.playback_mode_notice)
+
         queue_controls = QHBoxLayout()
 
         self.view_toggle_button = QPushButton(
@@ -1725,6 +1738,15 @@ class QueuePage(QWidget):
     def render_items(self, items: list[dict]) -> None:
         self._queue_items = list(items)
         self._refresh_local_view()
+
+    def set_playback_mode(self, mode: str) -> None:
+        round_robin = mode == "round_robin"
+        self.playback_mode_notice.setText(
+            "Round Robin playback is active. Queue reordering "
+            "is saved, but does not affect the active playback "
+            "order. Standard mode will use the saved queue order."
+        )
+        self.playback_mode_notice.setVisible(round_robin)
 
     def apply_search(self, query: str) -> None:
         self._search_query = query.strip().casefold()
