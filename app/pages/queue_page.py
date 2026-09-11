@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QMenu,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QTableWidget,
@@ -66,10 +67,13 @@ class QueueCard(QFrame):
         item: dict,
         select_callback: Callable[[], None],
         parent: QWidget | None = None,
+        drag_callback: Callable[[], None] | None = None,
     ):
         super().__init__(parent)
 
         self._select_callback = select_callback
+        self._drag_callback = drag_callback
+        self._drag_start_position = None
 
         self.setObjectName("queueCard")
         self.setFrameShape(QFrame.Shape.StyledPanel)
@@ -280,7 +284,43 @@ class QueueCard(QFrame):
 
     def mousePressEvent(self, event) -> None:
         self._select_callback()
+
+        if (
+            event.button()
+            == Qt.MouseButton.LeftButton
+        ):
+            self._drag_start_position = (
+                event.position().toPoint()
+            )
+
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if (
+            self._drag_callback is not None
+            and self._drag_start_position is not None
+            and event.buttons()
+            & Qt.MouseButton.LeftButton
+        ):
+            distance = (
+                event.position().toPoint()
+                - self._drag_start_position
+            ).manhattanLength()
+
+            if (
+                distance
+                >= QApplication.startDragDistance()
+            ):
+                self._drag_start_position = None
+                self._drag_callback()
+                event.accept()
+                return
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._drag_start_position = None
+        super().mouseReleaseEvent(event)
 
     def set_thumbnail(self, pixmap: QPixmap) -> None:
         if pixmap.isNull():
@@ -293,6 +333,218 @@ class QueueCard(QFrame):
         )
         self.thumbnail_label.setPixmap(scaled)
         self.thumbnail_label.setText("")
+
+
+class ReorderableQueueTable(QTableWidget):
+    def __init__(
+        self,
+        rows: int,
+        columns: int,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(rows, columns, parent)
+
+        self._drag_reorder_enabled = False
+        self._drag_source_row: int | None = None
+        self._reorder_callback: (
+            Callable[[int, int], None] | None
+        ) = None
+
+        self.setDragDropOverwriteMode(False)
+        self.setDefaultDropAction(
+            Qt.DropAction.MoveAction
+        )
+        self.set_drag_reorder_enabled(False)
+
+    def set_reorder_callback(
+        self,
+        callback: Callable[[int, int], None] | None,
+    ) -> None:
+        self._reorder_callback = callback
+
+    def set_drag_reorder_enabled(
+        self,
+        enabled: bool,
+    ) -> None:
+        self._drag_reorder_enabled = bool(enabled)
+
+        self.setDragEnabled(
+            self._drag_reorder_enabled
+        )
+        self.setAcceptDrops(
+            self._drag_reorder_enabled
+        )
+        self.viewport().setAcceptDrops(
+            self._drag_reorder_enabled
+        )
+        self.setDropIndicatorShown(
+            self._drag_reorder_enabled
+        )
+        self.setDragDropMode(
+            QAbstractItemView.DragDropMode.InternalMove
+            if self._drag_reorder_enabled
+            else QAbstractItemView.DragDropMode.NoDragDrop
+        )
+
+    def begin_row_drag(self, row: int) -> None:
+        if not self._drag_reorder_enabled:
+            return
+
+        model_item = self.item(row, 0)
+
+        if not self._is_queued_item(model_item):
+            return
+
+        self._drag_source_row = row
+        self.selectRow(row)
+        self.startDrag(Qt.DropAction.MoveAction)
+
+    @staticmethod
+    def _is_queued_item(
+        model_item: QTableWidgetItem | None,
+    ) -> bool:
+        if model_item is None:
+            return False
+
+        position = model_item.data(
+            Qt.ItemDataRole.UserRole + 1
+        )
+
+        try:
+            return int(position) >= 1
+        except (TypeError, ValueError):
+            return False
+
+    def queued_rows(self) -> list[int]:
+        return [
+            row
+            for row in range(self.rowCount())
+            if self._is_queued_item(
+                self.item(row, 0)
+            )
+        ]
+
+    def request_reorder(
+        self,
+        source_row: int,
+        target_position: int,
+    ) -> bool:
+        if (
+            not self._drag_reorder_enabled
+            or self._reorder_callback is None
+        ):
+            return False
+
+        source_item = self.item(source_row, 0)
+
+        if not self._is_queued_item(source_item):
+            return False
+
+        queued_count = len(self.queued_rows())
+
+        try:
+            item_id = int(
+                source_item.data(
+                    Qt.ItemDataRole.UserRole
+                )
+            )
+            current_position = int(
+                source_item.data(
+                    Qt.ItemDataRole.UserRole + 1
+                )
+            )
+            target_position = int(target_position)
+        except (TypeError, ValueError):
+            return False
+
+        if (
+            target_position < 1
+            or target_position > queued_count
+            or target_position == current_position
+        ):
+            return False
+
+        self._reorder_callback(
+            item_id,
+            target_position,
+        )
+        return True
+
+    def dropEvent(self, event) -> None:
+        if not self._drag_reorder_enabled:
+            event.ignore()
+            return
+
+        source_row = self._drag_source_row
+        self._drag_source_row = None
+
+        if source_row is None:
+            event.ignore()
+            return
+
+        queued_rows = self.queued_rows()
+
+        if source_row not in queued_rows:
+            event.ignore()
+            return
+
+        source_index = queued_rows.index(source_row)
+        point = event.position().toPoint()
+        hovered_index = self.indexAt(point)
+
+        if not hovered_index.isValid():
+            insertion_index = len(queued_rows)
+        else:
+            hovered_row = hovered_index.row()
+
+            if hovered_row not in queued_rows:
+                insertion_index = (
+                    0
+                    if (
+                        queued_rows
+                        and hovered_row < queued_rows[0]
+                    )
+                    else len(queued_rows)
+                )
+            else:
+                hovered_queue_index = (
+                    queued_rows.index(hovered_row)
+                )
+                hovered_rect = self.visualRect(
+                    hovered_index
+                )
+                drop_after = (
+                    point.y()
+                    > hovered_rect.center().y()
+                )
+                insertion_index = (
+                    hovered_queue_index
+                    + (1 if drop_after else 0)
+                )
+
+        if insertion_index > source_index:
+            insertion_index -= 1
+
+        final_index = max(
+            0,
+            min(
+                insertion_index,
+                len(queued_rows) - 1,
+            ),
+        )
+
+        moved = self.request_reorder(
+            source_row,
+            final_index + 1,
+        )
+
+        if moved:
+            event.setDropAction(
+                Qt.DropAction.MoveAction
+            )
+            event.accept()
+        else:
+            event.ignore()
 
 
 class QueuePage(QWidget):
@@ -312,6 +564,9 @@ class QueuePage(QWidget):
         move_to_position_callback: Callable[[], None],
         remove_callback: Callable[[], None],
         clear_queue_callback: Callable[[], None],
+        drag_reorder_callback: (
+            Callable[[int, int], None] | None
+        ) = None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -322,8 +577,15 @@ class QueuePage(QWidget):
         self._search_query = ""
         self._filter_platform: str | None = None
         self._filter_status: str | None = None
+        self._filter_submitter: str | None = None
+        self._filter_submission_source: str | None = None
         self._sort_by: str | None = None
         self._sort_descending = False
+        self._drag_reorder_enabled = False
+        self._drag_reorder_busy = False
+        self._drag_reorder_callback = (
+            drag_reorder_callback
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 12)
@@ -359,14 +621,70 @@ class QueuePage(QWidget):
         )
 
         header.addWidget(title)
-        header.addSpacing(12)
-        header.addWidget(self.video_count_label)
         header.addStretch()
-        header.addWidget(self.player_count_label)
-        header.addSpacing(12)
-        header.addWidget(self.manager_count_label)
 
         group_layout.addLayout(header)
+
+        self.queue_status_area = QFrame()
+        self.queue_status_area.setObjectName(
+            "queueStatusArea"
+        )
+        self.queue_status_area.setFrameShape(
+            QFrame.Shape.StyledPanel
+        )
+
+        status_layout = QHBoxLayout(
+            self.queue_status_area
+        )
+        status_layout.setContentsMargins(
+            12,
+            7,
+            12,
+            7,
+        )
+        status_layout.setSpacing(10)
+
+        self.video_count_label.setObjectName(
+            "queueVisibleVideoCount"
+        )
+
+        self.filter_status_label = QLabel(
+            "Filters: None"
+        )
+        self.filter_status_label.setObjectName(
+            "queueActiveFilters"
+        )
+
+        self.sort_status_label = QLabel(
+            "Sort: Queue Order"
+        )
+        self.sort_status_label.setObjectName(
+            "queueActiveSort"
+        )
+
+        status_layout.addWidget(
+            self.video_count_label
+        )
+        status_layout.addWidget(QLabel("|"))
+        status_layout.addWidget(
+            self.filter_status_label
+        )
+        status_layout.addWidget(QLabel("|"))
+        status_layout.addWidget(
+            self.sort_status_label
+        )
+        status_layout.addStretch()
+        status_layout.addWidget(
+            self.player_count_label
+        )
+        status_layout.addWidget(QLabel("|"))
+        status_layout.addWidget(
+            self.manager_count_label
+        )
+
+        group_layout.addWidget(
+            self.queue_status_area
+        )
 
         queue_controls = QHBoxLayout()
 
@@ -412,6 +730,21 @@ class QueuePage(QWidget):
         )
         self.sort_button.clicked.connect(
             self.show_sort_dialog
+        )
+
+        self.drag_reorder_button = QPushButton(
+            "Drag Reorder: Off"
+        )
+        self.drag_reorder_button.setObjectName(
+            "queueDragReorderButton"
+        )
+        self.drag_reorder_button.setCheckable(True)
+        self.drag_reorder_button.setToolTip(
+            "Enable dragging queue cards into a new "
+            "canonical queue position"
+        )
+        self.drag_reorder_button.clicked.connect(
+            self.toggle_drag_reorder
         )
 
         self.select_all_button = QPushButton("Select All")
@@ -566,6 +899,9 @@ class QueuePage(QWidget):
             self.sort_button
         )
         queue_controls.addWidget(
+            self.drag_reorder_button
+        )
+        queue_controls.addWidget(
             self.select_all_button
         )
         queue_controls.addWidget(
@@ -605,8 +941,14 @@ class QueuePage(QWidget):
         group_layout.addLayout(queue_controls)
         group_layout.addLayout(maintenance_controls)
 
-        self.queue_table = QTableWidget(0, 1)
+        self.queue_table = ReorderableQueueTable(
+            0,
+            1,
+        )
         self.queue_table.setObjectName("queueTable")
+        self.queue_table.set_reorder_callback(
+            self._request_drag_reorder
+        )
 
         self.queue_table.horizontalHeader().hide()
         self.queue_table.verticalHeader().hide()
@@ -654,6 +996,172 @@ class QueuePage(QWidget):
 
         layout.addWidget(group, 1)
 
+    @staticmethod
+    def _queue_position(item: dict) -> int | None:
+        try:
+            position = int(item.get("position"))
+        except (TypeError, ValueError):
+            return None
+
+        return position if position >= 1 else None
+
+    def optimistically_reorder_item(
+        self,
+        item_id: int,
+        target_position: int,
+    ) -> bool:
+        queued_items = sorted(
+            (
+                dict(item)
+                for item in self._queue_items
+                if self._queue_position(item) is not None
+            ),
+            key=lambda item: (
+                self._queue_position(item) or 0
+            ),
+        )
+
+        source_index = next(
+            (
+                index
+                for index, item in enumerate(queued_items)
+                if item.get("id") == item_id
+            ),
+            None,
+        )
+
+        if source_index is None:
+            return False
+
+        try:
+            target_index = int(target_position) - 1
+        except (TypeError, ValueError):
+            return False
+
+        if not 0 <= target_index < len(queued_items):
+            return False
+
+        moved_item = queued_items.pop(source_index)
+        queued_items.insert(target_index, moved_item)
+
+        for position, item in enumerate(
+            queued_items,
+            start=1,
+        ):
+            item["position"] = position
+
+        replacements = iter(queued_items)
+        reordered_items = []
+
+        for item in self._queue_items:
+            if self._queue_position(item) is None:
+                reordered_items.append(item)
+            else:
+                reordered_items.append(next(replacements))
+
+        self._queue_items = reordered_items
+        self._refresh_local_view()
+        return True
+
+    def set_drag_reorder_busy(
+        self,
+        busy: bool,
+    ) -> None:
+        self._drag_reorder_busy = bool(busy)
+        self.drag_reorder_button.setEnabled(
+            not self._drag_reorder_busy
+            and self.view_mode == "queue"
+        )
+
+        if self._drag_reorder_busy:
+            self.drag_reorder_button.setText(
+                "Drag Reorder: Saving..."
+            )
+            self.queue_table.set_drag_reorder_enabled(
+                False
+            )
+            return
+
+        self.drag_reorder_button.setText(
+            "Drag Reorder: On"
+            if self._drag_reorder_enabled
+            else "Drag Reorder: Off"
+        )
+        self.queue_table.set_drag_reorder_enabled(
+            self._drag_reorder_enabled
+            and self._drag_reorder_is_available()
+        )
+
+    def _drag_reorder_is_available(self) -> bool:
+        return (
+            self.view_mode == "queue"
+            and not self._search_query
+            and self._filter_platform is None
+            and self._filter_status is None
+            and self._filter_submitter is None
+            and self._filter_submission_source is None
+            and self._sort_by is None
+        )
+
+    def set_drag_reorder_enabled(
+        self,
+        enabled: bool,
+    ) -> bool:
+        enabled = bool(enabled)
+
+        if (
+            enabled
+            and not self._drag_reorder_is_available()
+        ):
+            self._drag_reorder_enabled = False
+            self.drag_reorder_button.setChecked(False)
+            self.drag_reorder_button.setText(
+                "Drag Reorder: Off"
+            )
+            self.queue_table.set_drag_reorder_enabled(
+                False
+            )
+
+            QMessageBox.information(
+                self,
+                "Drag Reorder Unavailable",
+                "Return to the Queue and clear search, "
+                "filters, and sorting before enabling "
+                "drag reordering.",
+            )
+            return False
+
+        self._drag_reorder_enabled = enabled
+        self.drag_reorder_button.setChecked(enabled)
+        self.drag_reorder_button.setText(
+            "Drag Reorder: On"
+            if enabled
+            else "Drag Reorder: Off"
+        )
+        self.queue_table.set_drag_reorder_enabled(
+            enabled
+        )
+        return enabled
+
+    def toggle_drag_reorder(
+        self,
+        checked: bool = False,
+    ) -> None:
+        self.set_drag_reorder_enabled(bool(checked))
+
+    def _request_drag_reorder(
+        self,
+        item_id: int,
+        target_position: int,
+    ) -> None:
+        if self._drag_reorder_callback is None:
+            return
+
+        self._drag_reorder_callback(
+            item_id,
+            target_position,
+        )
+
     def toggle_view_mode(self) -> None:
         if self.view_mode == "queue":
             self.set_view_mode("history")
@@ -677,6 +1185,7 @@ class QueuePage(QWidget):
 
         queue_only_controls = (
             self.add_video_button,
+            self.drag_reorder_button,
             self.select_all_button,
             self.move_to_beginning_button,
             self.move_up_button,
@@ -815,7 +1324,16 @@ class QueuePage(QWidget):
 
     def show_filter_dialog(self) -> None:
         dialog = QDialog(self)
-        dialog.setWindowTitle("Queue Filters")
+
+        view_name = (
+            "History"
+            if self.view_mode == "history"
+            else "Queue"
+        )
+
+        dialog.setWindowTitle(
+            f"{view_name} Filters"
+        )
         dialog.setModal(True)
 
         layout = QVBoxLayout(dialog)
@@ -823,26 +1341,170 @@ class QueuePage(QWidget):
         layout.addWidget(QLabel("Platform"))
 
         platform_combo = QComboBox()
-        platform_combo.addItem("Any", None)
-        platform_combo.addItem("YouTube", "youtube")
-        platform_combo.addItem("TikTok", "tiktok")
+        platform_combo.setObjectName(
+            "queuePlatformFilter"
+        )
+        platform_combo.addItem("Any Platform", None)
+        platform_combo.addItem(
+            "YouTube",
+            "youtube",
+        )
+        platform_combo.addItem(
+            "TikTok",
+            "tiktok",
+        )
+
+        platform_index = platform_combo.findData(
+            self._filter_platform
+        )
+
+        if platform_index >= 0:
+            platform_combo.setCurrentIndex(
+                platform_index
+            )
+
         layout.addWidget(platform_combo)
 
         layout.addWidget(QLabel("Status"))
 
         status_combo = QComboBox()
-        status_combo.addItem("Any", None)
-        status_combo.addItem("Queued", "queued")
-        status_combo.addItem("Playing", "playing")
-        status_combo.addItem("Played", "played")
+        status_combo.setObjectName(
+            "queueStatusFilter"
+        )
+        status_combo.addItem("Any Status", None)
+        status_combo.addItem(
+            "Queued",
+            "queued",
+        )
+        status_combo.addItem(
+            "Playing",
+            "playing",
+        )
+        status_combo.addItem(
+            "Played",
+            "played",
+        )
+
+        status_index = status_combo.findData(
+            self._filter_status
+        )
+
+        if status_index >= 0:
+            status_combo.setCurrentIndex(
+                status_index
+            )
+
         layout.addWidget(status_combo)
+
+        layout.addWidget(QLabel("Submitted By"))
+
+        submitter_combo = QComboBox()
+        submitter_combo.setObjectName(
+            "queueSubmitterFilter"
+        )
+        submitter_combo.addItem(
+            "Any Submitter",
+            None,
+        )
+
+        submitters = sorted(
+            {
+                str(
+                    item.get("submitted_by") or ""
+                ).strip()
+                for item in self._queue_items
+                if str(
+                    item.get("submitted_by") or ""
+                ).strip()
+            },
+            key=str.casefold,
+        )
+
+        for submitter in submitters:
+            submitter_combo.addItem(
+                submitter,
+                submitter.casefold(),
+            )
+
+        submitter_index = submitter_combo.findData(
+            self._filter_submitter
+        )
+
+        if submitter_index >= 0:
+            submitter_combo.setCurrentIndex(
+                submitter_index
+            )
+
+        layout.addWidget(submitter_combo)
+
+        layout.addWidget(
+            QLabel("Submission Source")
+        )
+
+        source_combo = QComboBox()
+        source_combo.setObjectName(
+            "queueSubmissionSourceFilter"
+        )
+        source_combo.addItem(
+            "Any Source",
+            None,
+        )
+        source_combo.addItem(
+            "Chat",
+            "chat",
+        )
+        source_combo.addItem(
+            "Manager",
+            "manager",
+        )
+        source_combo.addItem(
+            "Player",
+            "player",
+        )
+
+        source_index = source_combo.findData(
+            self._filter_submission_source
+        )
+
+        if source_index >= 0:
+            source_combo.setCurrentIndex(
+                source_index
+            )
+
+        layout.addWidget(source_combo)
 
         button_row = QHBoxLayout()
 
         clear_button = QPushButton("Clear")
+        clear_button.setObjectName(
+            "clearQueueFiltersButton"
+        )
+        clear_button.setEnabled(
+            any(
+                value is not None
+                for value in (
+                    self._filter_platform,
+                    self._filter_status,
+                    self._filter_submitter,
+                    self._filter_submission_source,
+                )
+            )
+        )
+
+        cancel_button = QPushButton("Cancel")
+        cancel_button.setObjectName(
+            "cancelQueueFiltersButton"
+        )
+
         apply_button = QPushButton("Apply")
+        apply_button.setObjectName(
+            "applyQueueFiltersButton"
+        )
+        apply_button.setDefault(True)
 
         button_row.addWidget(clear_button)
+        button_row.addStretch()
+        button_row.addWidget(cancel_button)
         button_row.addWidget(apply_button)
         layout.addLayout(button_row)
 
@@ -854,10 +1516,13 @@ class QueuePage(QWidget):
             self.apply_filters(
                 platform=platform_combo.currentData(),
                 status=status_combo.currentData(),
+                submitter=submitter_combo.currentData(),
+                submission_source=source_combo.currentData(),
             )
             dialog.accept()
 
         clear_button.clicked.connect(clear_filters)
+        cancel_button.clicked.connect(dialog.reject)
         apply_button.clicked.connect(
             apply_selected_filters
         )
@@ -890,6 +1555,11 @@ class QueuePage(QWidget):
         sort_combo.addItem("Platform", "platform")
         sort_combo.addItem("Submitter", "submitted_by")
         sort_combo.addItem("Added", "created_at")
+
+        sort_combo.addItem(
+            "Video Length",
+            "duration",
+        )
         sort_combo.addItem("Played", "played_at")
         layout.addWidget(sort_combo)
 
@@ -1072,6 +1742,8 @@ class QueuePage(QWidget):
         *,
         platform: str | None = None,
         status: str | None = None,
+        submitter: str | None = None,
+        submission_source: str | None = None,
     ) -> None:
         self._filter_platform = (
             platform.strip().casefold()
@@ -1083,6 +1755,66 @@ class QueuePage(QWidget):
             if status
             else None
         )
+        self._filter_submitter = (
+            submitter.strip().casefold()
+            if submitter
+            else None
+        )
+        self._filter_submission_source = (
+            submission_source.strip().casefold()
+            if submission_source
+            else None
+        )
+
+        active_filters = []
+
+        if self._filter_platform:
+            active_filters.append(
+                "Platform: "
+                + self._filter_platform.title()
+            )
+
+        if self._filter_status:
+            active_filters.append(
+                "Status: "
+                + self._filter_status.title()
+            )
+
+        if self._filter_submitter:
+            active_filters.append(
+                "Submitted by: "
+                + self._filter_submitter
+            )
+
+        if self._filter_submission_source:
+            active_filters.append(
+                "Source: "
+                + self._filter_submission_source.title()
+            )
+
+        active_count = len(active_filters)
+
+        self.filters_button.setText(
+            f"Filters ({active_count})"
+            if active_count
+            else "Filters"
+        )
+
+        self.filters_button.setToolTip(
+            "; ".join(active_filters)
+            if active_filters
+            else "Filter the current view"
+        )
+
+        self.filter_status_label.setText(
+            (
+                "Filters: "
+                + "; ".join(active_filters)
+            )
+            if active_filters
+            else "Filters: None"
+        )
+
         self._refresh_local_view()
 
     def apply_sort(
@@ -1091,18 +1823,65 @@ class QueuePage(QWidget):
         sort_by: str | None = None,
         descending: bool = False,
     ) -> None:
-        self._sort_by = sort_by
-        self._sort_descending = bool(descending)
+        self._sort_by = (
+            sort_by.strip().casefold()
+            if sort_by
+            else None
+        )
+        self._sort_descending = (
+            bool(descending)
+            if self._sort_by is not None
+            else False
+        )
 
         self.sort_button.setText(
             "Sort (Active)"
-            if self._sort_by
+            if self._sort_by is not None
             else "Sort"
+        )
+
+        sort_labels = {
+            "position": "Queue Position",
+            "title": "Title",
+            "channel": "Video Channel",
+            "platform": "Platform",
+            "submitted_by": "Submitted By",
+            "created_at": "Date Added",
+            "duration": "Video Length",
+        }
+
+        if self._sort_by is None:
+            sort_text = "Sort: Queue Order"
+        else:
+            label = sort_labels.get(
+                self._sort_by,
+                self._sort_by.replace(
+                    "_",
+                    " ",
+                ).title(),
+            )
+            direction = (
+                "Descending"
+                if self._sort_descending
+                else "Ascending"
+            )
+            sort_text = (
+                f"Sort: {label} ({direction})"
+            )
+
+        self.sort_status_label.setText(
+            sort_text
         )
 
         self._refresh_local_view()
 
     def _refresh_local_view(self) -> None:
+        if (
+            self._drag_reorder_enabled
+            and not self._drag_reorder_is_available()
+        ):
+            self.set_drag_reorder_enabled(False)
+
         searchable_fields = (
             "title",
             "video_channel",
@@ -1133,6 +1912,39 @@ class QueuePage(QWidget):
                 self._filter_status is not None
                 and str(item.get("status") or "").casefold()
                 != self._filter_status
+            ):
+                continue
+
+            if (
+                self._filter_submitter is not None
+                and str(
+                    item.get("submitted_by") or ""
+                ).casefold()
+                != self._filter_submitter
+            ):
+                continue
+
+            item_source = str(
+                item.get("submission_source") or ""
+            ).casefold()
+
+            if (
+                self._filter_submission_source == "chat"
+                and item_source not in {
+                    "chat",
+                    "twitch",
+                }
+            ):
+                continue
+
+            if (
+                self._filter_submission_source
+                not in {
+                    None,
+                    "chat",
+                }
+                and item_source
+                != self._filter_submission_source
             ):
                 continue
 
@@ -1167,7 +1979,10 @@ class QueuePage(QWidget):
                 else:
                     value = item.get(self._sort_by)
 
-                if self._sort_by == "position":
+                if self._sort_by in {
+                    "position",
+                    "duration",
+                }:
                     try:
                         return int(value)
                     except (TypeError, ValueError):
@@ -1228,6 +2043,10 @@ class QueuePage(QWidget):
                 item,
                 lambda row=row: self.queue_table.selectRow(row),
                 self.queue_table,
+                drag_callback=(
+                    lambda row=row:
+                    self.queue_table.begin_row_drag(row)
+                ),
             )
 
             self.queue_table.setCellWidget(

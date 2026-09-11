@@ -36,6 +36,7 @@ from app.bot_hosting_restart import (
 from app.bot_hosting_restart_worker import (
     BotHostingRestartWorker,
 )
+from app.queue_move_worker import QueueMoveWorker
 from app.control_network_credentials import (
     ControlNetworkCredentialStore,
 )
@@ -212,6 +213,7 @@ class ManagerWindow(QMainWindow):
             self.move_selected_to_position,
             self.remove_selected,
             self.clear_queue,
+            self.move_queue_item_by_drag,
         )
 
         self.queue_page.view_toggle_button.clicked.connect(
@@ -3103,6 +3105,92 @@ class ManagerWindow(QMainWindow):
                 "Selected queue item has invalid queue data."
             )
             return None
+
+    def move_queue_item_by_drag(
+        self,
+        item_id: int,
+        target_position: int,
+    ) -> None:
+        active_worker = getattr(
+            self,
+            "_queue_move_worker",
+            None,
+        )
+
+        if (
+            active_worker is not None
+            and active_worker.is_running()
+        ):
+            self.status_label.setText(
+                "A queue reorder is already being saved."
+            )
+            return
+
+        if not self.queue_page.optimistically_reorder_item(
+            int(item_id),
+            int(target_position),
+        ):
+            self.status_label.setText(
+                "The queue item could not be moved locally."
+            )
+            return
+
+        self._update_client()
+
+        worker = QueueMoveWorker(
+            self.bot_client,
+            int(item_id),
+            int(target_position),
+        )
+        worker.completed.connect(
+            self._queue_move_completed
+        )
+        worker.failed.connect(
+            self._queue_move_failed
+        )
+
+        self._queue_move_worker = worker
+        self.queue_page.set_drag_reorder_busy(True)
+        self.status_label.setText(
+            "Saving queue order..."
+        )
+
+        if not worker.start():
+            self.queue_page.set_drag_reorder_busy(False)
+            self.status_label.setText(
+                "A queue reorder is already being saved."
+            )
+            self.refresh_queue()
+
+    def _queue_move_completed(
+        self,
+        item_id: int,
+        target_position: int,
+        _result: dict,
+    ) -> None:
+        self.queue_page.set_drag_reorder_busy(False)
+        self.status_label.setText(
+            "Queue item moved to position "
+            f"{target_position}."
+        )
+
+    def _queue_move_failed(
+        self,
+        _item_id: int,
+        _target_position: int,
+        error: object,
+    ) -> None:
+        self.queue_page.set_drag_reorder_busy(False)
+
+        if isinstance(error, BotClientError):
+            self._show_error(error)
+        else:
+            self.status_label.setText(
+                "Queue reorder failed: "
+                f"{error}"
+            )
+
+        self.refresh_queue()
 
     def _move_selected_to(
         self,
