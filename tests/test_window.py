@@ -2996,3 +2996,154 @@ def test_refresh_streamer_authorization_status(
         .streamer_auth_status_label.text()
         == "Streamer channel: Authorized as smokeeeg"
     )
+
+
+def test_drag_reorder_uses_background_worker(
+    qtbot,
+    monkeypatch,
+):
+    from PySide6.QtCore import QTimer
+
+    from app.window import ManagerWindow
+
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    for timer in window.findChildren(QTimer):
+        timer.stop()
+
+    created = []
+
+    class FakeSignal:
+        def __init__(self):
+            self.callback = None
+
+        def connect(self, callback):
+            self.callback = callback
+
+        def emit(self, *args):
+            self.callback(*args)
+
+    class FakeWorker:
+        def __init__(
+            self,
+            client,
+            item_id,
+            target_position,
+        ):
+            self.client = client
+            self.item_id = item_id
+            self.target_position = target_position
+            self.completed = FakeSignal()
+            self.failed = FakeSignal()
+            self.running = False
+            created.append(self)
+
+        def start(self):
+            self.running = True
+            return True
+
+        def is_running(self):
+            return self.running
+
+    monkeypatch.setattr(
+        "app.window.QueueMoveWorker",
+        FakeWorker,
+    )
+
+    local_moves = []
+
+    window.bot_client = object()
+    window._update_client = lambda: None
+    window.queue_page.optimistically_reorder_item = (
+        lambda item_id, position:
+        local_moves.append((item_id, position))
+        or True
+    )
+
+    window.move_queue_item_by_drag(42, 3)
+
+    assert local_moves == [(42, 3)]
+    assert len(created) == 1
+    assert created[0].item_id == 42
+    assert created[0].target_position == 3
+    assert (
+        window.status_label.text()
+        == "Saving queue order..."
+    )
+    assert (
+        window.queue_page.drag_reorder_button.text()
+        == "Drag Reorder: Saving..."
+    )
+
+    created[0].running = False
+    created[0].completed.emit(
+        42,
+        3,
+        {
+            "id": 42,
+            "position": 3,
+        },
+    )
+
+    assert (
+        window.status_label.text()
+        == "Queue item moved to position 3."
+    )
+
+
+def test_batch_ingestion_uses_qthread_and_cleans_up_after_finish(
+    qtbot,
+):
+    window = ManagerWindow()
+    qtbot.addWidget(window)
+
+    calls = []
+
+    class FakeClient:
+        def add_queue_item(
+            self,
+            url,
+            *,
+            title=None,
+            video_channel=None,
+            submitted_by=None,
+        ):
+            calls.append(
+                {
+                    "url": url,
+                    "submitted_by": submitted_by,
+                }
+            )
+            return {"id": len(calls)}
+
+    window.bot_client = FakeClient()
+    window._update_client = lambda: None
+    window.refresh_queue = lambda: None
+    window.manager_page.manager_username_input.setText(
+        "ManagerUser"
+    )
+
+    window._start_batch_ingestion(
+        [
+            {"url": "https://example.com/one"},
+        ],
+        label="Bulk Add",
+    )
+
+    assert window._bulk_ingestion_worker is not None
+    assert window._bulk_ingestion_thread is not None
+
+    qtbot.waitUntil(
+        lambda: window._bulk_ingestion_thread is None,
+        timeout=3000,
+    )
+
+    assert calls == [
+        {
+            "url": "https://example.com/one",
+            "submitted_by": "ManagerUser",
+        }
+    ]
+    assert window._bulk_ingestion_worker is None
+    assert "Bulk Add complete" in window.status_label.text()

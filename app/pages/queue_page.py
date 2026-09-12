@@ -61,6 +61,31 @@ def _format_duration(value) -> str:
     return f"{minutes}:{seconds:02d}"
 
 
+def _format_queue_time(value) -> str:
+    if value in (None, ""):
+        return "--:--:--"
+
+    text = str(value).strip()
+
+    if not text:
+        return "--:--:--"
+
+    try:
+        from datetime import datetime, timezone
+
+        normalized = text.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+
+        # SQLite CURRENT_TIMESTAMP is UTC but timezone-naive.
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+
+        local_time = parsed.astimezone()
+
+        return local_time.strftime("%H:%M:%S")
+    except (TypeError, ValueError):
+        return text
+
 class QueueCard(QFrame):
     def __init__(
         self,
@@ -146,6 +171,7 @@ class QueueCard(QFrame):
         duration = _format_duration(item.get("duration"))
         submitted_by = item.get("submitted_by") or "Unknown"
         status = item.get("status") or "Unknown"
+        created_at = _format_queue_time(item.get("created_at"))
         url = item.get("url") or ""
 
         text_layout = QVBoxLayout()
@@ -165,7 +191,7 @@ class QueueCard(QFrame):
         self.details_label.setObjectName("queueCardDetails")
 
         self.submitter_label = QLabel(
-            f"Submitted by: {submitted_by}"
+            f"Submitted by: {submitted_by}  |  Added: {created_at}"
         )
         self.submitter_label.setObjectName(
             "queueCardSubmitter"
@@ -568,6 +594,7 @@ class QueuePage(QWidget):
             Callable[[int, int], None] | None
         ) = None,
         parent: QWidget | None = None,
+        bulk_add_callback: Callable[[], None] | None = None,
     ):
         super().__init__(parent)
 
@@ -720,6 +747,21 @@ class QueuePage(QWidget):
         self.add_video_button.clicked.connect(
             add_video_callback
         )
+
+        self.bulk_add_button = QPushButton("Bulk Add")
+        self.bulk_add_button.setObjectName(
+            "bulkAddVideoButton"
+        )
+        self.bulk_add_button.setToolTip(
+            "Paste multiple YouTube and TikTok links"
+        )
+
+        if bulk_add_callback is not None:
+            self.bulk_add_button.clicked.connect(
+                bulk_add_callback
+            )
+        else:
+            self.bulk_add_button.setEnabled(False)
 
         self.search_button = QPushButton("Search")
         self.search_button.setObjectName(
@@ -901,6 +943,9 @@ class QueuePage(QWidget):
         )
         queue_controls.addWidget(
             self.add_video_button
+        )
+        queue_controls.addWidget(
+            self.bulk_add_button
         )
         queue_controls.addWidget(
             self.search_button

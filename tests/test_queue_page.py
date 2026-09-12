@@ -76,6 +76,8 @@ def test_dark_theme_styles_dialogs_and_combo_boxes():
     assert "QMessageBox {" in dark_source
     assert "QComboBox {" in dark_source
     assert "QComboBox:focus {" in dark_source
+    assert "QDialog#bulkIngestionProgressDialog" in dark_source
+    assert "QProgressBar#bulkIngestionProgressBar" in dark_source
 
 
 def test_now_playing_queue_card_uses_np_position_badge():
@@ -1631,3 +1633,59 @@ def test_drag_reorder_busy_state_preserves_toggle():
         page.drag_reorder_button.text()
         == "Drag Reorder: On"
     )
+
+def test_format_queue_time_uses_hh_mm_ss():
+    from datetime import datetime, timezone
+
+    from app.pages.queue_page import _format_queue_time
+
+    expected = (
+        datetime(
+            2026,
+            9,
+            11,
+            18,
+            14,
+            16,
+            tzinfo=timezone.utc,
+        )
+        .astimezone()
+        .strftime("%H:%M:%S")
+    )
+
+    assert (
+        _format_queue_time("2026-09-11 18:14:16")
+        == expected
+    )
+
+
+def test_format_queue_time_accepts_iso_timestamp():
+    from datetime import datetime, timezone
+
+    from app.pages.queue_page import _format_queue_time
+
+    expected = (
+        datetime(
+            2026,
+            9,
+            11,
+            7,
+            5,
+            3,
+            987654,
+            tzinfo=timezone.utc,
+        )
+        .astimezone()
+        .strftime("%H:%M:%S")
+    )
+
+    assert (
+        _format_queue_time("2026-09-11T07:05:03.987654")
+        == expected
+    )
+
+
+def test_format_queue_time_missing_value():
+    from app.pages.queue_page import _format_queue_time
+
+    assert _format_queue_time(None) == "--:--:--"

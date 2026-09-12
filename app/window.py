@@ -1,7 +1,7 @@
 import csv
 import os
 from urllib.parse import urlsplit
-from PySide6.QtCore import QTimer, Qt, QUrl, Signal
+from PySide6.QtCore import QThread, QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from datetime import datetime
 from PySide6.QtWidgets import (
@@ -88,6 +88,12 @@ class ManagerWindow(QMainWindow):
             ControlNetworkCredentialStore()
         )
         self._bot_restart_worker = None
+        self._bulk_ingestion_worker = None
+        self._bulk_ingestion_thread = None
+        self._bulk_ingestion_dialog = None
+        self._bulk_ingestion_label = None
+        self._bulk_ingestion_pending_summary = None
+        self._bulk_ingestion_pending_error = None
 
         configured_url = os.getenv(
             "LINKCUE_BOT_URL",
@@ -214,6 +220,7 @@ class ManagerWindow(QMainWindow):
             self.remove_selected,
             self.clear_queue,
             self.move_queue_item_by_drag,
+            bulk_add_callback=self.show_bulk_add_dialog,
         )
 
         self.queue_page.view_toggle_button.clicked.connect(
@@ -530,6 +537,37 @@ class ManagerWindow(QMainWindow):
 
                 QMessageBox QLabel {
                     color: #f1f3f5;
+                }
+
+                QDialog#bulkIngestionProgressDialog {
+                    background-color: #111318;
+                    color: #f1f3f5;
+                }
+
+                QDialog#bulkIngestionProgressDialog QLabel {
+                    color: #f1f3f5;
+                }
+
+                QLabel#bulkIngestionCurrentUrlLabel {
+                    color: #aeb8c7;
+                    background-color: #101217;
+                    border: 1px solid #343c49;
+                    border-radius: 6px;
+                    padding: 7px 9px;
+                }
+
+                QProgressBar#bulkIngestionProgressBar {
+                    background-color: #101217;
+                    color: #ffffff;
+                    border: 1px solid #343c49;
+                    border-radius: 6px;
+                    text-align: center;
+                    min-height: 24px;
+                }
+
+                QProgressBar#bulkIngestionProgressBar::chunk {
+                    background-color: #3568ad;
+                    border-radius: 5px;
                 }
 
                 /* -----------------------------------------------------
@@ -2852,6 +2890,8 @@ class ManagerWindow(QMainWindow):
         )
 
     def import_queue_csv(self) -> None:
+        from app.bulk_ingestion import read_csv_ingestion_items
+
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Import LinkCue Queue",
@@ -2863,153 +2903,466 @@ class ManagerWindow(QMainWindow):
             return
 
         try:
-            with open(
-                file_path,
-                "r",
-                newline="",
-                encoding="utf-8-sig",
-            ) as csv_file:
-                reader = csv.DictReader(csv_file)
-
-                if reader.fieldnames is None:
-                    self.status_label.setText(
-                        "Queue import failed: CSV has no header."
-                    )
-                    return
-
-                normalized_headers = {
-                    header.strip()
-                    for header in reader.fieldnames
-                    if header is not None
-                }
-
-                missing = {
-                    "position",
-                    "url",
-                } - normalized_headers
-
-                if missing:
-                    self.status_label.setText(
-                        "Queue import failed: required column(s) "
-                        + ", ".join(sorted(missing))
-                        + " missing."
-                    )
-                    return
-
-                rows = []
-
-                for line_number, row in enumerate(
-                    reader,
-                    start=2,
-                ):
-                    raw_position = (
-                        row.get("position") or ""
-                    ).strip()
-                    url = (
-                        row.get("url") or ""
-                    ).strip()
-
-                    if not raw_position:
-                        self.status_label.setText(
-                            "Queue import failed: "
-                            f"line {line_number} has no position."
-                        )
-                        return
-
-                    try:
-                        position = int(raw_position)
-                    except ValueError:
-                        self.status_label.setText(
-                            "Queue import failed: "
-                            f"line {line_number} has an invalid position."
-                        )
-                        return
-
-                    if position < 1:
-                        self.status_label.setText(
-                            "Queue import failed: "
-                            f"line {line_number} position must be positive."
-                        )
-                        return
-
-                    if not url:
-                        self.status_label.setText(
-                            "Queue import failed: "
-                            f"line {line_number} has no URL."
-                        )
-                        return
-
-                    rows.append(
-                        {
-                            "position": position,
-                            "url": url,
-                            "title": (
-                                row.get("title") or ""
-                            ).strip(),
-                            "channel": (
-                                row.get("channel") or ""
-                            ).strip(),
-                            "submitted_by": (
-                                row.get("submitted_by") or ""
-                            ).strip(),
-                        }
-                    )
-
-        except (OSError, csv.Error) as exc:
+            items, label = read_csv_ingestion_items(
+                file_path
+            )
+        except (OSError, ValueError, csv.Error) as exc:
             self.status_label.setText(
                 f"Queue import failed: {exc}"
             )
             return
 
-        positions = [
-            row["position"]
-            for row in rows
+        self._start_batch_ingestion(
+            items,
+            label=label,
+        )
+
+    def show_bulk_add_dialog(self) -> None:
+        from PySide6.QtWidgets import (
+            QDialog,
+            QHBoxLayout,
+            QLabel,
+            QPlainTextEdit,
+            QPushButton,
+            QVBoxLayout,
+        )
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Bulk Add Videos")
+        dialog.resize(700, 520)
+
+        layout = QVBoxLayout(dialog)
+
+        instructions = QLabel(
+            "Paste YouTube and/or TikTok links below.\n"
+            "Use one link per line. Blank lines are ignored."
+        )
+        instructions.setWordWrap(True)
+        layout.addWidget(instructions)
+
+        links_input = QPlainTextEdit()
+        links_input.setObjectName(
+            "bulkAddLinksInput"
+        )
+        links_input.setPlaceholderText(
+            "https://www.youtube.com/watch?v=...\n"
+            "https://www.tiktok.com/@user/video/..."
+        )
+        layout.addWidget(links_input, 1)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+
+        cancel_button = QPushButton("Cancel")
+        start_button = QPushButton("Start Ingestion")
+
+        cancel_button.clicked.connect(dialog.reject)
+        start_button.clicked.connect(dialog.accept)
+
+        button_row.addWidget(cancel_button)
+        button_row.addWidget(start_button)
+        layout.addLayout(button_row)
+
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+
+        urls = [
+            line.strip()
+            for line in links_input.toPlainText().splitlines()
+            if line.strip()
         ]
 
-        if len(positions) != len(set(positions)):
+        if not urls:
             self.status_label.setText(
-                "Queue import failed: duplicate positions found."
+                "Bulk Add: no links were provided."
             )
             return
 
-        rows.sort(
-            key=lambda row: row["position"]
+        self._start_batch_ingestion(
+            [
+                {"url": url}
+                for url in urls
+            ],
+            label="Bulk Add",
         )
+
+    def _start_batch_ingestion(
+        self,
+        items: list[dict],
+        *,
+        label: str,
+    ) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import (
+            QHBoxLayout,
+            QLabel,
+            QProgressBar,
+            QPushButton,
+            QVBoxLayout,
+        )
+
+        from app.bulk_ingestion import (
+            BulkIngestionProgressDialog,
+            BulkIngestionWorker,
+        )
+
+        active_worker = getattr(
+            self,
+            "_bulk_ingestion_worker",
+            None,
+        )
+
+        active_thread = getattr(
+            self,
+            "_bulk_ingestion_thread",
+            None,
+        )
+
+        if (
+            (
+                active_worker is not None
+                and active_worker.is_running()
+            )
+            or (
+                active_thread is not None
+                and active_thread.isRunning()
+            )
+        ):
+            self.status_label.setText(
+                "A batch ingestion is already running."
+            )
+            return
+
+        if not items:
+            self.status_label.setText(
+                f"{label}: no links to process."
+            )
+            return
 
         self._update_client()
 
-        imported = 0
-        already_queued = 0
-        failed = 0
+        submitted_by = (
+            self.manager_page.manager_username()
+            or None
+        )
 
-        for row in rows:
-            try:
-                self.bot_client.add_queue_item(
-                    row["url"],
-                    title=row["title"] or None,
-                    video_channel=(
-                        row["channel"] or None
-                    ),
-                    submitted_by=(
-                        row["submitted_by"] or None
-                    ),
-                )
-                imported += 1
+        worker = BulkIngestionWorker(
+            self.bot_client,
+            items,
+            default_submitted_by=submitted_by,
+        )
+        thread = QThread(self)
+        worker.moveToThread(thread)
 
-            except BotClientError as exc:
-                if exc.status_code == 409:
-                    already_queued += 1
-                else:
-                    failed += 1
+        dialog = BulkIngestionProgressDialog(
+            self._cancel_batch_ingestion,
+            self,
+        )
+        dialog.setWindowTitle(f"{label} Progress")
+        dialog.resize(700, 240)
+        dialog.setWindowModality(
+            Qt.WindowModality.WindowModal
+        )
+
+        layout = QVBoxLayout(dialog)
+
+        status = QLabel(f"Preparing 0 / {len(items)}")
+        status.setObjectName("bulkIngestionStatusLabel")
+        status.setWordWrap(True)
+        layout.addWidget(status)
+
+        current_url = QLabel()
+        current_url.setObjectName("bulkIngestionCurrentUrlLabel")
+        current_url.setWordWrap(True)
+        current_url.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        layout.addWidget(current_url)
+
+        progress = QProgressBar()
+        progress.setObjectName("bulkIngestionProgressBar")
+        progress.setRange(0, len(items))
+        progress.setValue(0)
+        progress.setFormat(
+            "%v / %m processed"
+        )
+        layout.addWidget(progress)
+
+        counts = QLabel(
+            "Added: 0 | Already queued: 0 | Failed: 0"
+        )
+        counts.setObjectName("bulkIngestionCountsLabel")
+        layout.addWidget(counts)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+
+        cancel_button = QPushButton("Cancel")
+        cancel_button.setObjectName("bulkIngestionCancelButton")
+        button_row.addWidget(cancel_button)
+        layout.addLayout(button_row)
+
+        dialog.status_label = status
+        dialog.current_url_label = current_url
+        dialog.progress_bar = progress
+        dialog.counts_label = counts
+        dialog.cancel_button = cancel_button
+
+        self._bulk_ingestion_worker = worker
+        self._bulk_ingestion_thread = thread
+        self._bulk_ingestion_dialog = dialog
+        self._bulk_ingestion_label = label
+        self._bulk_ingestion_pending_summary = None
+        self._bulk_ingestion_pending_error = None
+
+        thread.started.connect(worker.run)
+        worker.item_started.connect(
+            self._batch_ingestion_item_started
+        )
+        worker.progress.connect(
+            self._batch_ingestion_progress
+        )
+        worker.completed.connect(
+            self._batch_ingestion_completed
+        )
+        worker.failed.connect(
+            self._batch_ingestion_failed
+        )
+        thread.finished.connect(
+            self._batch_ingestion_thread_finished
+        )
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+
+        cancel_button.clicked.connect(
+            self._cancel_batch_ingestion
+        )
+
+        dialog.show()
+        thread.start()
+
+    def _batch_ingestion_item_started(
+        self,
+        index: int,
+        total: int,
+        url: str,
+    ) -> None:
+        dialog = getattr(
+            self,
+            "_bulk_ingestion_dialog",
+            None,
+        )
+
+        if dialog is None:
+            return
+
+        dialog.status_label.setText(
+            f"Processing {index} / {total}"
+        )
+        dialog.current_url_label.setText(url)
+
+    def _batch_ingestion_progress(
+        self,
+        processed: int,
+        total: int,
+        url: str,
+        added: int,
+        already_queued: int,
+        failed: int,
+    ) -> None:
+        dialog = getattr(
+            self,
+            "_bulk_ingestion_dialog",
+            None,
+        )
+
+        if dialog is None:
+            return
+
+        dialog.progress_bar.setMaximum(total)
+        dialog.progress_bar.setValue(processed)
+        dialog.current_url_label.setText(url)
+        dialog.counts_label.setText(
+            f"Added: {added} | "
+            f"Already queued: {already_queued} | "
+            f"Failed: {failed}"
+        )
+
+    def _cancel_batch_ingestion(self) -> None:
+        worker = getattr(
+            self,
+            "_bulk_ingestion_worker",
+            None,
+        )
+        dialog = getattr(
+            self,
+            "_bulk_ingestion_dialog",
+            None,
+        )
+        thread = getattr(
+            self,
+            "_bulk_ingestion_thread",
+            None,
+        )
+
+        if worker is None:
+            return
+
+        if not worker.is_running() and not (
+            thread is not None
+            and thread.isRunning()
+        ):
+            return
+
+        worker.cancel()
+
+        if dialog is not None:
+            dialog.cancel_button.setEnabled(False)
+            dialog.status_label.setText(
+                "Cancelling after the current item..."
+            )
+
+    def _batch_ingestion_completed(
+        self,
+        summary: dict,
+    ) -> None:
+        self._bulk_ingestion_pending_summary = dict(
+            summary
+        )
+
+        thread = getattr(
+            self,
+            "_bulk_ingestion_thread",
+            None,
+        )
+
+        if thread is not None and thread.isRunning():
+            thread.quit()
+
+    def _finish_batch_ingestion_completed(
+        self,
+        summary: dict,
+    ) -> None:
+        dialog = getattr(
+            self,
+            "_bulk_ingestion_dialog",
+            None,
+        )
+        label = getattr(
+            self,
+            "_bulk_ingestion_label",
+            "Batch ingestion",
+        )
+
+        added = int(summary.get("added", 0))
+        already = int(summary.get("already_queued", 0))
+        failed = int(summary.get("failed", 0))
+        cancelled = int(summary.get("cancelled", 0))
+        processed = int(summary.get("processed", 0))
+        total = int(summary.get("total", 0))
+
+        message = (
+            f"{label} complete: "
+            f"{added} added, "
+            f"{already} already queued, "
+            f"{failed} failed"
+        )
+
+        if cancelled:
+            message += f", {cancelled} cancelled"
+
+        message += "."
 
         self.refresh_queue()
+        self.status_label.setText(message)
 
-        self.status_label.setText(
-            "Import complete: "
-            f"{imported} added, "
-            f"{already_queued} already queued, "
-            f"{failed} failed."
+        if dialog is not None:
+            dialog.mark_finished()
+            dialog.progress_bar.setMaximum(total)
+            dialog.progress_bar.setValue(processed)
+            dialog.status_label.setText(message)
+            dialog.current_url_label.clear()
+
+            try:
+                dialog.cancel_button.clicked.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+
+            dialog.cancel_button.setText("Close")
+            dialog.cancel_button.setEnabled(True)
+            dialog.cancel_button.clicked.connect(
+                dialog.accept
+            )
+
+    def _batch_ingestion_failed(
+        self,
+        error: str,
+    ) -> None:
+        self._bulk_ingestion_pending_error = error
+
+        thread = getattr(
+            self,
+            "_bulk_ingestion_thread",
+            None,
         )
+
+        if thread is not None and thread.isRunning():
+            thread.quit()
+
+    def _finish_batch_ingestion_failed(
+        self,
+        error: str,
+    ) -> None:
+        dialog = getattr(
+            self,
+            "_bulk_ingestion_dialog",
+            None,
+        )
+
+        message = f"Batch ingestion failed: {error}"
+        self.status_label.setText(message)
+
+        if dialog is not None:
+            dialog.mark_finished()
+            dialog.status_label.setText(message)
+
+            try:
+                dialog.cancel_button.clicked.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+
+            dialog.cancel_button.setText("Close")
+            dialog.cancel_button.setEnabled(True)
+            dialog.cancel_button.clicked.connect(
+                dialog.accept
+            )
+
+    def _batch_ingestion_thread_finished(self) -> None:
+        summary = getattr(
+            self,
+            "_bulk_ingestion_pending_summary",
+            None,
+        )
+        error = getattr(
+            self,
+            "_bulk_ingestion_pending_error",
+            None,
+        )
+
+        if summary is not None:
+            self._finish_batch_ingestion_completed(
+                summary
+            )
+        elif error is not None:
+            self._finish_batch_ingestion_failed(error)
+
+        self._bulk_ingestion_worker = None
+        self._bulk_ingestion_thread = None
+        self._bulk_ingestion_dialog = None
+        self._bulk_ingestion_label = None
+        self._bulk_ingestion_pending_summary = None
+        self._bulk_ingestion_pending_error = None
+
 
     def show_add_video_dialog(self) -> None:
         dialog = AddVideoDialog(self)
