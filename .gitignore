@@ -10,3 +10,12 @@ dist/
 .env
 .idea/
 .vscode/
+venv/
+*.pyc
+*.pyo
+*.pyd
+release/
+*.spec
+*.log
+icon preview*.png
+*-inspection.zip
